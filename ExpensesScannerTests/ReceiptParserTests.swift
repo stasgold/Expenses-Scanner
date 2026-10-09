@@ -235,10 +235,10 @@ struct ReceiptParserTests {
         let receipt = parse("""
         Invoice
         Amount due  60.00
-        Room service  25.00
+        Spa  25.00
         Minibar  35.00
         """)
-        #expect(items(receipt) == ["Room service=2500", "Minibar=3500"])
+        #expect(items(receipt) == ["Spa=2500", "Minibar=3500"])
         #expect(receipt.total == 6000)
         #expect(receipt.mismatch == 0)
     }
