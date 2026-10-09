@@ -1,6 +1,6 @@
 # Expenses Scanner: plan
 
-> **Progress:** stages 1 (foundations), 2 (currencies) and 3 (scanning) are built and tested; see the README.
+> **Progress:** stages 1 (foundations), 2 (currencies), 3 (scanning) and 4 (translation) are built and tested; see the README.
 > Scanning came with a first version of per-item assignment (a chip per person on each line).
 
 Photograph a receipt, let the phone read the items and translate them into your language, assign each

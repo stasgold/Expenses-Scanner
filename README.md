@@ -13,7 +13,7 @@ The full plan (features, data model, OCR, translation, rate caching, testing, mi
 
 ## Status
 
-**Stages 1–3** are in place: trips and balances, exchange rates, and receipt scanning.
+**Stages 1–4** are in place: trips and balances, exchange rates, receipt scanning and translation.
 
 - **Trips** with a home currency and the people on them. Swipe a trip to rename or delete it.
 - **Scan a receipt** with the camera (edges found and straightened, several pages for a long one) or
@@ -24,6 +24,10 @@ The full plan (features, data model, OCR, translation, rate caching, testing, mi
   editable, a chip per person to say who had what (everyone, until you change it), the extras shared by
   what each person had or equally, a warning when the lines don't add up to the receipt's total, and each
   person's share. Saved receipts reopen in the same screen.
+- **Translate the bill** into the language you pick (your phone's by default, per trip): every line
+  shows its translation under the original, and *Show whole receipt translated* lists the receipt line
+  by line in your language with the amounts as printed. Apple's Translation framework, on the device;
+  only words are translated, never amounts.
 - **Typed-in expenses** for everything without a receipt: amount, currency, date, who paid, and shares
   (2 counts double, 0 leaves someone out).
 - **Exchange rates fetched automatically** for each expense's day: European Central Bank rates via
@@ -35,8 +39,7 @@ The full plan (features, data model, OCR, translation, rate caching, testing, mi
   and *Mark as paid*.
 - **Share** a trip as plain text.
 
-Next: translating the bill (stage 4) and finer item assignment (stage 5: shares per item, tap a person
-then their items).
+Next: finer item assignment (stage 5: shares per item, tap a person then their items).
 
 ## How the maths stays exact
 
@@ -96,6 +99,8 @@ ExpensesScanner/
 ├── Receipts/
 │   ├── ReceiptScanner.swift       Document camera, Vision text recognition, page stacking
 │   └── ReceiptParser.swift        Rows from text positions; items, extras, total, currency, date
+├── Translation/
+│   └── ReceiptTranslation.swift   Language detection, what to translate (words only), applying answers
 ├── Rates/
 │   ├── ExchangeRates.swift        Providers (Frankfurter, currency-api), cache, rate service
 │   └── RateUpdater.swift          Fills in rates for expenses waiting for one
