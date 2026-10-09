@@ -27,6 +27,13 @@ jobs:
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
 
+      - name: Exchange-rate providers answer
+        # Informational: shows the live response shape the app's parsers expect. Never fails the build.
+        continue-on-error: true
+        run: |
+          curl -sS -m 20 "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,THB,JPY" | head -c 400; echo
+          curl -sS -m 20 "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/eur.min.json" | head -c 300; echo
+
       - name: Pick a simulator
         id: sim
         run: |

@@ -136,7 +136,7 @@ enum ExpensesSchemaV1: VersionedSchema {
         var amount: Int64 = 0
         var quantity: Int = 1
         var position: Int = 0
-        // Where the line sits on the receipt photo, normalised 0…1 with the origin at the bottom left.
+        // Where the line sits on the receipt photo, normalised 0…1 with the origin at the top left.
         var boxX: Double?
         var boxY: Double?
         var boxWidth: Double?
@@ -240,7 +240,10 @@ extension Expense {
             lines: orderedItems.map { item in
                 LineInput(
                     amount: item.amount,
-                    shares: item.shares.filter { !$0.isDeleted }.map { ShareInput(participant: $0.participantID, weight: $0.weight) }
+                    shares: item.shares
+                        .filter { !$0.isDeleted }
+                        .sorted { $0.participantID.uuidString < $1.participantID.uuidString }
+                        .map { ShareInput(participant: $0.participantID, weight: $0.weight) }
                 )
             },
             tax: tax,
@@ -253,4 +256,25 @@ extension Expense {
     }
 
     var total: Int64 { input.total }
+
+    /// In another currency, with no rate the user typed, and no fresh fetched one yet.
+    var needsRate: Bool {
+        guard let home = trip?.homeCurrency, currency != home, rateSource != .manual else { return false }
+        return rate == nil || rateSource == .cachedFallback
+    }
+}
+
+extension ExpenseItem {
+    var box: OCRBox? {
+        get {
+            guard let boxX, let boxY, let boxWidth, let boxHeight else { return nil }
+            return OCRBox(x: boxX, y: boxY, width: boxWidth, height: boxHeight)
+        }
+        set {
+            boxX = newValue?.x
+            boxY = newValue?.y
+            boxWidth = newValue?.width
+            boxHeight = newValue?.height
+        }
+    }
 }

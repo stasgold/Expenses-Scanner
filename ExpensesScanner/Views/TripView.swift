@@ -1,5 +1,7 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
 
 /// One trip: its expenses, or who owes whom.
 struct TripView: View {
@@ -12,6 +14,19 @@ struct TripView: View {
     @State private var showParticipants = false
     @State private var showSettings = false
     @State private var confirmation: Confirmation?
+    @State private var receipt: ReceiptSession?
+    @State private var showScanner = false
+    @State private var showPhotoPicker = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var reading = false
+    @State private var readFailed = false
+
+    /// A receipt open for review: just scanned (`expenseID` nil) or saved earlier.
+    private struct ReceiptSession: Identifiable {
+        let id = UUID()
+        var draft: ReceiptExpenseDraft
+        var expenseID: UUID?
+    }
 
     private enum Tab: Hashable {
         case expenses, balances
@@ -77,7 +92,9 @@ struct TripView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { addExpense(to: trip) } label: {
+                Menu {
+                    addMenu(trip)
+                } label: {
                     Label(L10n.addExpense, systemImage: "plus")
                 }
             }
@@ -112,7 +129,69 @@ struct TripView: View {
                 store.updateTrip(trip, name: name, homeCurrency: currency)
             }
         }
+        .sheet(item: $receipt) { session in
+            ReceiptEditorView(
+                isNew: session.expenseID == nil,
+                participants: trip.snapshot.participants,
+                homeCurrency: trip.homeCurrency,
+                draft: session.draft
+            ) { draft in
+                if let id = session.expenseID, let expense = trip.orderedExpenses.first(where: { $0.uuid == id }) {
+                    store.updateReceipt(expense, draft)
+                } else {
+                    _ = store.addReceipt(to: trip, draft)
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showScanner) {
+            DocumentScanner(
+                onScan: { pages in
+                    showScanner = false
+                    read(pages, for: trip)
+                },
+                onCancel: { showScanner = false }
+            )
+            .ignoresSafeArea()
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            photoItem = nil
+            loadPhoto(item, for: trip)
+        }
+        .overlay {
+            if reading {
+                ProgressView(L10n.readingReceipt)
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
+        .alert(L10n.readFailedTitle, isPresented: $readFailed) {
+            Button(L10n.ok, role: .cancel) {}
+        } message: {
+            Text(L10n.readFailedMessage)
+        }
         .confirmation($confirmation)
+        // Expenses in other currencies get their rate as soon as one can be fetched.
+        .task(id: RateUpdater.pendingKey(trip)) {
+            await RateUpdater.fill(trip, store: store)
+        }
+    }
+
+    /// Scan, pick a photo, or type it in.
+    @ViewBuilder
+    private func addMenu(_ trip: Trip) -> some View {
+        if DocumentScanner.isAvailable {
+            Button { startScan(trip) } label: {
+                Label(L10n.scanReceipt, systemImage: "doc.viewfinder")
+            }
+        }
+        Button { choosePhoto(trip) } label: {
+            Label(L10n.choosePhoto, systemImage: "photo")
+        }
+        Button { addExpense(to: trip) } label: {
+            Label(L10n.enterManually, systemImage: "square.and.pencil")
+        }
     }
 
     // MARK: Expenses tab
@@ -125,15 +204,25 @@ struct TripView: View {
             } description: {
                 Text(snapshot.participants.isEmpty ? L10n.noPeopleSubtitle : L10n.noExpensesSubtitle)
             } actions: {
-                Button(snapshot.participants.isEmpty ? L10n.addPeople : L10n.addExpense) { addExpense(to: trip) }
+                if snapshot.participants.isEmpty {
+                    Button(L10n.addPeople) { showParticipants = true }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        if DocumentScanner.isAvailable { startScan(trip) } else { choosePhoto(trip) }
+                    } label: {
+                        Label(DocumentScanner.isAvailable ? L10n.scanReceipt : L10n.choosePhoto, systemImage: "doc.viewfinder")
+                    }
                     .buttonStyle(.borderedProminent)
+                    Button(L10n.enterManually) { addExpense(to: trip) }
+                }
             }
             .frame(maxHeight: .infinity)
         } else {
             List {
                 ForEach(snapshot.expenses) { expense in
                     Button {
-                        if expense.kind != .transfer { editor = .edit(expense.id) }
+                        open(expense, in: trip)
                     } label: {
                         ExpenseRow(expense: expense, trip: snapshot)
                     }
@@ -146,7 +235,7 @@ struct TripView: View {
                     }
                     .contextMenu {
                         if expense.kind != .transfer {
-                            Button { editor = .edit(expense.id) } label: { Label(L10n.edit, systemImage: "pencil") }
+                            Button { open(expense, in: trip) } label: { Label(L10n.edit, systemImage: "pencil") }
                         }
                         Button(role: .destructive) { confirmDelete(expense, in: trip, snapshot: snapshot) } label: {
                             Label(L10n.delete, systemImage: "trash")
@@ -189,6 +278,71 @@ struct TripView: View {
     }
 
     // MARK: Actions
+
+    /// Receipts open in the receipt editor, typed-in expenses in theirs; transfers aren't edited.
+    private func open(_ expense: ExpenseSnapshot, in trip: Trip) {
+        switch expense.kind {
+        case .manual:
+            editor = .edit(expense.id)
+        case .receipt:
+            if let model = trip.orderedExpenses.first(where: { $0.uuid == expense.id }) {
+                receipt = ReceiptSession(draft: store.receiptDraft(for: model), expenseID: model.uuid)
+            }
+        case .transfer:
+            break
+        }
+    }
+
+    private func startScan(_ trip: Trip) {
+        if trip.orderedParticipants.isEmpty {
+            showParticipants = true
+        } else {
+            showScanner = true
+        }
+    }
+
+    private func choosePhoto(_ trip: Trip) {
+        if trip.orderedParticipants.isEmpty {
+            showParticipants = true
+        } else {
+            showPhotoPicker = true
+        }
+    }
+
+    private func loadPhoto(_ item: PhotosPickerItem, for trip: Trip) {
+        reading = true
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                read([image], for: trip)
+            } else {
+                reading = false
+                readFailed = true
+            }
+        }
+    }
+
+    /// Reads the receipt on the device, then opens it for review.
+    private func read(_ pages: [UIImage], for trip: Trip) {
+        guard !pages.isEmpty else { return }
+        reading = true
+        let currency = lastCurrency(in: trip)
+        let people = trip.snapshot.participants.map(\.id)
+        Task {
+            defer { reading = false }
+            do {
+                let scanned = try await ReceiptScanner.scan(pages)
+                let rows = LineGrouper.rows(scanned.fragments)
+                let parsed = ReceiptParser.parse(rows, currency: currency)
+                let draft = ReceiptExpenseDraft(
+                    parsed: parsed, rows: rows, currency: currency, date: Date(),
+                    payer: people.first, participants: people, photo: scanned.photo
+                )
+                receipt = ReceiptSession(draft: draft, expenseID: nil)
+            } catch {
+                readFailed = true
+            }
+        }
+    }
 
     private func addExpense(to trip: Trip) {
         if trip.orderedParticipants.isEmpty {
@@ -283,6 +437,7 @@ struct ExpenseRow: View {
     private var homeAmount: String? {
         guard expense.currency.uppercased() != trip.homeCurrency.uppercased() else { return nil }
         guard let home = trip.homeTotal(of: expense) else { return L10n.noRateYet }
-        return "≈ " + Money.format(home, trip.homeCurrency)
+        let amount = "≈ " + Money.format(home, trip.homeCurrency)
+        return expense.rateIsApproximate ? amount + " · " + L10n.offlineRate : amount
     }
 }

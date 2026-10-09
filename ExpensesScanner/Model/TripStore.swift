@@ -117,7 +117,7 @@ struct TripStore {
         let item = ExpenseItem(name: expense.title, amount: 0, position: 0)
         context.insert(item)
         expense.items.append(item)
-        apply(draft, to: expense, in: trip)
+        apply(draft, to: expense, in: trip, previous: RateKey(expense))
         touch(trip)
         save()
         return expense
@@ -125,9 +125,10 @@ struct TripStore {
 
     func updateExpense(_ expense: Expense, _ draft: ManualExpenseDraft) {
         guard let trip = expense.trip else { return }
+        let previous = RateKey(expense)
         expense.title = draft.title.trimmed
         expense.date = draft.date
-        apply(draft, to: expense, in: trip)
+        apply(draft, to: expense, in: trip, previous: previous)
         touch(trip)
         save()
     }
@@ -155,6 +156,80 @@ struct TripStore {
         touch(trip)
         save()
         return expense
+    }
+
+    // MARK: Receipts
+
+    @discardableResult
+    func addReceipt(to trip: Trip, _ draft: ReceiptExpenseDraft) -> Expense {
+        let expense = Expense(title: draft.title.trimmed, date: draft.date, currency: draft.currency.uppercased(), kindRaw: ExpenseKind.receipt.rawValue)
+        context.insert(expense)
+        trip.expenses.append(expense)
+        expense.photo = draft.photo
+        expense.ocrLines = draft.rows.isEmpty ? nil : try? JSONEncoder().encode(draft.rows)
+        apply(draft, to: expense, in: trip, previous: RateKey(expense))
+        touch(trip)
+        save()
+        return expense
+    }
+
+    func updateReceipt(_ expense: Expense, _ draft: ReceiptExpenseDraft) {
+        guard let trip = expense.trip else { return }
+        let previous = RateKey(expense)
+        expense.title = draft.title.trimmed
+        expense.date = draft.date
+        apply(draft, to: expense, in: trip, previous: previous)
+        touch(trip)
+        save()
+    }
+
+    /// The editor's starting point for an existing receipt.
+    func receiptDraft(for expense: Expense) -> ReceiptExpenseDraft {
+        var draft = ReceiptExpenseDraft(currency: expense.currency)
+        draft.title = expense.title
+        draft.date = expense.date
+        draft.payerID = expense.payerID
+        draft.items = expense.orderedItems.map { item in
+            var weights: [UUID: Int] = [:]
+            for share in item.shares where !share.isDeleted {
+                weights[share.participantID, default: 0] += share.weight
+            }
+            return ReceiptItemDraft(name: item.name, amount: item.amount, quantity: item.quantity, box: item.box, weights: weights)
+        }
+        draft.tax = expense.tax
+        draft.taxIncluded = expense.taxIncluded
+        draft.tip = expense.tip
+        draft.service = expense.service
+        draft.discount = expense.discount
+        draft.extrasMode = expense.extrasMode
+        draft.printedTotal = expense.printedTotal
+        draft.rateToHome = expense.rateSource == .manual ? expense.rate : nil
+        draft.photo = expense.photo
+        draft.rows = expense.ocrLines.flatMap { try? JSONDecoder().decode([ReceiptRow].self, from: $0) } ?? []
+        return draft
+    }
+
+    // MARK: Exchange rates
+
+    /**
+     * Puts a fetched rate on an expense, unless the user typed their own, or the expense's currency, day
+     * or trip currency changed while the rate was on its way. A fresh rate never gives way to an older
+     * stand-in. Doesn't bump the trip's `updatedAt`: fetching a rate isn't using the trip.
+     */
+    @discardableResult
+    func applyFetchedRate(_ quote: RateQuote, to expense: Expense, expected: RateKey, home: CurrencyCode) -> Bool {
+        guard !expense.isDeleted,
+              expense.trip?.homeCurrency == home,
+              RateKey(expense) == expected,
+              expense.rateSource != .manual,
+              !(quote.source == .cachedFallback && expense.rateSource == .provider)
+        else { return false }
+        expense.rate = quote.rate
+        expense.rateSource = quote.source
+        expense.rateDate = ExchangeRates.date(fromDay: quote.day)
+        expense.rateFetchedAt = quote.fetchedAt
+        save()
+        return true
     }
 
     /// The editor's starting point for an existing manual expense.
@@ -193,12 +268,42 @@ struct TripStore {
         return participant
     }
 
-    /// Writes a manual draft into its expense: the single line, its shares, the payer and the rate.
-    private func apply(_ draft: ManualExpenseDraft, to expense: Expense, in trip: Trip) {
+    /// Writes a receipt draft into its expense: every line with its shares, the extras, payer and rate.
+    private func apply(_ draft: ReceiptExpenseDraft, to expense: Expense, in trip: Trip, previous: RateKey) {
         expense.payerID = draft.payerID
-        let currency = draft.currency.uppercased()
-        let currencyChanged = expense.currency != currency
-        expense.currency = currency
+        expense.currency = draft.currency.uppercased()
+        expense.tax = draft.tax
+        expense.taxIncluded = draft.taxIncluded
+        expense.tip = draft.tip
+        expense.service = draft.service
+        expense.discount = draft.discount
+        expense.extrasMode = draft.extrasMode
+        expense.printedTotal = draft.printedTotal
+
+        for item in expense.items { context.delete(item) }
+        expense.items = []
+        let people = trip.orderedParticipants
+        for (position, line) in draft.items.enumerated() {
+            let item = ExpenseItem(name: line.name.trimmed, amount: line.amount, position: position)
+            item.quantity = max(line.quantity, 1)
+            item.box = line.box
+            context.insert(item)
+            expense.items.append(item)
+            for participant in people {
+                let weight = line.weights[participant.uuid] ?? 0
+                guard weight > 0 else { continue }
+                let share = ItemShare(participantID: participant.uuid, weight: weight)
+                context.insert(share)
+                item.shares.append(share)
+            }
+        }
+        updateRate(of: expense, in: trip, typed: draft.rateToHome, previous: previous)
+    }
+
+    /// Writes a manual draft into its expense: the single line, its shares, the payer and the rate.
+    private func apply(_ draft: ManualExpenseDraft, to expense: Expense, in trip: Trip, previous: RateKey) {
+        expense.payerID = draft.payerID
+        expense.currency = draft.currency.uppercased()
 
         let item: ExpenseItem
         if let existing = expense.orderedItems.first {
@@ -220,16 +325,32 @@ struct TripStore {
             item.shares.append(share)
         }
 
-        if currency == trip.homeCurrency {
+        updateRate(of: expense, in: trip, typed: draft.rateToHome, previous: previous)
+    }
+
+    /// Keeps the expense's rate in step with its currency and day. A typed rate wins; a fetched one stays
+    /// only while the currency and day it was fetched for do, otherwise it is dropped and fetched again.
+    private func updateRate(of expense: Expense, in trip: Trip, typed: Decimal?, previous: RateKey) {
+        if expense.currency == trip.homeCurrency {
             clearRate(of: expense)
-        } else if let rate = draft.rateToHome {
-            expense.rate = rate
+        } else if let typed {
+            expense.rate = typed
             expense.rateSource = .manual
-            expense.rateDate = draft.date
+            expense.rateDate = expense.date
             expense.rateFetchedAt = nil
-        } else if expense.rateSource == .manual || currencyChanged {
-            // The user cleared their own rate, or the old rate was for another currency: wait for a new one.
+        } else if expense.rateSource == .manual || RateKey(expense) != previous {
             clearRate(of: expense)
+        }
+    }
+
+    /// What a fetched rate depends on: the expense's currency and day.
+    struct RateKey: Equatable {
+        var currency: CurrencyCode
+        var day: String
+
+        init(_ expense: Expense) {
+            currency = expense.currency
+            day = ExchangeRates.day(expense.date)
         }
     }
 
@@ -261,7 +382,8 @@ extension Trip {
                     currency: expense.currency,
                     payer: expense.payerID,
                     rateToHome: expense.rate,
-                    input: expense.input
+                    input: expense.input,
+                    rateIsApproximate: expense.rateSource == .cachedFallback
                 )
             }
         )

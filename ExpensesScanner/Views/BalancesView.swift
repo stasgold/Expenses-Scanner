@@ -8,11 +8,15 @@ struct BalancesView: View {
     let onSettle: (Transfer) -> Void
 
     var body: some View {
+        let approximate = trip.expenses.filter(\.rateIsApproximate).count
         List {
-            if !ledger.pendingRate.isEmpty || !ledger.missingPayer.isEmpty || ledger.unassigned != 0 {
+            if !ledger.pendingRate.isEmpty || !ledger.missingPayer.isEmpty || ledger.unassigned != 0 || approximate > 0 {
                 Section {
                     if !ledger.pendingRate.isEmpty {
                         Label(L10n.pendingRateNotice(ledger.pendingRate.count), systemImage: "exclamationmark.triangle")
+                    }
+                    if approximate > 0 {
+                        Label(L10n.approximateRateNotice(approximate), systemImage: "wifi.slash")
                     }
                     if !ledger.missingPayer.isEmpty {
                         Label(L10n.missingPayerNotice(ledger.missingPayer.count), systemImage: "exclamationmark.triangle")

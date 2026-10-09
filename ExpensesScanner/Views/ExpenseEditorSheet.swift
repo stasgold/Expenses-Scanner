@@ -14,7 +14,7 @@ struct ExpenseEditorSheet: View {
     @FocusState private var focus: Field?
 
     private enum Field {
-        case title, amount, rate
+        case title, amount
     }
 
     init(
@@ -34,7 +34,6 @@ struct ExpenseEditorSheet: View {
     }
 
     private var amount: Int64? { Money.parse(amountText, draft.currency) }
-    private var rate: Decimal? { Money.parseRate(rateText) }
     private var isForeign: Bool { draft.currency.uppercased() != homeCurrency.uppercased() }
 
     /// The draft with the typed amount and rate filled in.
@@ -42,21 +41,23 @@ struct ExpenseEditorSheet: View {
         var result = draft
         result.title = draft.title.trimmed
         result.amount = amount ?? 0
-        result.rateToHome = isForeign ? rate : nil
+        result.rateToHome = isForeign ? Money.parseRate(rateText) : nil
         // Shares for people no longer on the trip don't count.
         result.weights = draft.weights.filter { id, _ in participants.contains { $0.id == id } }
         return result
     }
 
     private var amountInvalid: Bool { !amountText.trimmed.isEmpty && amount == nil }
-    private var rateInvalid: Bool { isForeign && !rateText.trimmed.isEmpty && rate == nil }
+    private var rateInvalid: Bool { isForeign && !rateText.trimmed.isEmpty && Money.parseRate(rateText) == nil }
     private var canSave: Bool { result.isValid && !rateInvalid }
 
     var body: some View {
         NavigationStack {
             Form {
                 whatSection
-                if isForeign { rateSection }
+                if isForeign {
+                    RateSection(currency: draft.currency, homeCurrency: homeCurrency, date: draft.date, amount: amount, rateText: $rateText)
+                }
                 Section {
                     Picker(L10n.paidByLabel, selection: $draft.payerID) {
                         ForEach(participants) { participant in
@@ -111,31 +112,6 @@ struct ExpenseEditorSheet: View {
         } footer: {
             if amountInvalid {
                 Text(L10n.amountError).foregroundStyle(.red)
-            }
-        }
-    }
-
-    private var rateSection: some View {
-        Section {
-            HStack {
-                Text(L10n.rateLabel(draft.currency))
-                TextField(L10n.exchangeRate, text: $rateText, prompt: Text("0"))
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .focused($focus, equals: .rate)
-                    .monospacedDigit()
-                Text(homeCurrency)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(L10n.exchangeRate)
-        } footer: {
-            if rateInvalid {
-                Text(L10n.rateError).foregroundStyle(.red)
-            } else if let rate, let amount {
-                Text(L10n.rateConverted(Money.format(Money.convert(amount, from: draft.currency, to: homeCurrency, rate: rate), homeCurrency)))
-            } else {
-                Text(L10n.rateFooter(homeCurrency))
             }
         }
     }

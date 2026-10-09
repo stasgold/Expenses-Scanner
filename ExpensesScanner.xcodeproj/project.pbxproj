@@ -330,6 +330,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Expenses;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Expenses Scanner uses the camera to photograph receipts so it can read the items and prices. Photos stay on your device.";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -361,6 +362,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Expenses;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Expenses Scanner uses the camera to photograph receipts so it can read the items and prices. Photos stay on your device.";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

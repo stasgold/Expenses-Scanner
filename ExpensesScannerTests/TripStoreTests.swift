@@ -180,3 +180,147 @@ struct TripStoreTests {
         #expect(try count(ExpenseItem.self) == 1)
     }
 }
+
+@MainActor
+struct ReceiptAndRateStoreTests {
+    let container: ModelContainer
+    let store: TripStore
+
+    init() throws {
+        container = try ModelContainer.expenses(inMemory: true)
+        store = TripStore(context: container.mainContext)
+    }
+
+    private func quote(_ rate: String, day: String = "2026-10-08", source: RateSource = .provider) -> RateQuote {
+        RateQuote(rate: Decimal(string: rate)!, day: day, source: source, fetchedAt: Date(), provider: "frankfurter")
+    }
+
+    @Test func scannedReceiptIsSavedLineByLine() throws {
+        let trip = store.createTrip(name: "Bangkok", homeCurrency: "THB", people: ["Ann", "Ben"])
+        let (ann, ben) = (trip.orderedParticipants[0].uuid, trip.orderedParticipants[1].uuid)
+        var draft = ReceiptExpenseDraft(currency: "THB")
+        draft.title = " Baan Thai "
+        draft.payerID = ann
+        draft.items = [
+            ReceiptItemDraft(name: "Pad Thai", amount: 18_000, box: OCRBox(x: 0.1, y: 0.2, width: 0.5, height: 0.03), weights: [ann: 1]),
+            ReceiptItemDraft(name: "Singha", amount: 24_000, quantity: 2, weights: [ann: 1, ben: 1]),
+        ]
+        draft.service = 4200
+        draft.tax = 3234
+        draft.taxIncluded = false
+        draft.printedTotal = 49_434
+        draft.rows = receiptRows("Pad Thai  180.00")
+
+        let expense = store.addReceipt(to: trip, draft)
+        #expect(expense.kind == .receipt)
+        #expect(expense.title == "Baan Thai")
+        #expect(expense.orderedItems.map(\.name) == ["Pad Thai", "Singha"])
+        #expect(expense.orderedItems.first?.box == OCRBox(x: 0.1, y: 0.2, width: 0.5, height: 0.03))
+        #expect(expense.total == 49_434)
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<ItemShare>()) == 3)
+
+        // Back into the editor and out again, unchanged.
+        let reopened = store.receiptDraft(for: expense)
+        #expect(reopened.items.map(\.name) == draft.items.map(\.name))
+        #expect(reopened.items.map(\.weights) == draft.items.map(\.weights))
+        #expect(reopened.items.map(\.quantity) == [1, 2])
+        #expect(reopened.input == draft.input)
+        #expect(reopened.printedTotal == 49_434)
+        #expect(reopened.rows == draft.rows)
+
+        // Ann had the pad thai and half the beer; extras follow what each had.
+        let ledger = Ledger(trip.snapshot)
+        #expect(ledger.balances.map(\.net).reduce(0, +) == 0)
+        #expect(ledger.balances[1].owed == Split.shares(of: draft.input, participants: [ann, ben]).owed[ben])
+    }
+
+    @Test func editingAReceiptReplacesItsLines() throws {
+        let trip = store.createTrip(name: "Lisbon", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0].uuid
+        var draft = ReceiptExpenseDraft(currency: "EUR")
+        draft.payerID = ann
+        draft.items = [ReceiptItemDraft(name: "A", amount: 100, weights: [ann: 1]), ReceiptItemDraft(name: "B", amount: 200, weights: [ann: 1])]
+        let expense = store.addReceipt(to: trip, draft)
+
+        var edited = store.receiptDraft(for: expense)
+        edited.items.removeFirst()
+        edited.items[0].amount = 250
+        store.updateReceipt(expense, edited)
+        #expect(expense.orderedItems.map(\.amount) == [250])
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<ExpenseItem>()) == 1)
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<ItemShare>()) == 1)
+    }
+
+    @Test func fetchedRatesFillWaitingExpenses() {
+        let trip = store.createTrip(name: "Bangkok", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0]
+        let expense = store.addExpense(to: trip, ManualExpenseDraft(title: "Taxi", amount: 35_000, currency: "THB", payerID: ann.uuid, weights: [ann.uuid: 1]))
+        #expect(expense.needsRate)
+
+        #expect(store.applyFetchedRate(quote("0.0274"), to: expense, expected: TripStore.RateKey(expense), home: "EUR"))
+        #expect(expense.rate == Decimal(string: "0.0274"))
+        #expect(expense.rateSource == .provider)
+        #expect(!expense.needsRate)
+        #expect(Ledger(trip.snapshot).spent == 959)
+    }
+
+    @Test func fetchedRatesNeverOverrideTheUsersOwn() throws {
+        let trip = store.createTrip(name: "Bangkok", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0]
+        let typed = try #require(Decimal(string: "0.0280"))
+        let expense = store.addExpense(to: trip, ManualExpenseDraft(title: "Taxi", amount: 35_000, currency: "THB", payerID: ann.uuid, weights: [ann.uuid: 1], rateToHome: typed))
+        #expect(!expense.needsRate)
+        #expect(!store.applyFetchedRate(quote("0.0274"), to: expense, expected: TripStore.RateKey(expense), home: "EUR"))
+        #expect(expense.rate == typed)
+    }
+
+    @Test func aRateForWhatTheExpenseUsedToBeIsIgnored() {
+        let trip = store.createTrip(name: "Bangkok", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0]
+        let expense = store.addExpense(to: trip, ManualExpenseDraft(title: "Taxi", amount: 35_000, currency: "THB", payerID: ann.uuid, weights: [ann.uuid: 1]))
+        let asked = TripStore.RateKey(expense)
+
+        // The user switched the expense to yen while the baht rate was on its way.
+        var draft = store.draft(for: expense)
+        draft.currency = "JPY"
+        store.updateExpense(expense, draft)
+        #expect(!store.applyFetchedRate(quote("0.0274"), to: expense, expected: asked, home: "EUR"))
+        #expect(expense.rate == nil)
+        // …or changed the trip's currency.
+        #expect(!store.applyFetchedRate(quote("0.0061"), to: expense, expected: TripStore.RateKey(expense), home: "USD"))
+    }
+
+    @Test func anOlderStandInNeverReplacesAFreshRate() {
+        let trip = store.createTrip(name: "Bangkok", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0]
+        let expense = store.addExpense(to: trip, ManualExpenseDraft(title: "Taxi", amount: 35_000, currency: "THB", payerID: ann.uuid, weights: [ann.uuid: 1]))
+        let key = TripStore.RateKey(expense)
+
+        #expect(store.applyFetchedRate(quote("0.0270", source: .cachedFallback), to: expense, expected: key, home: "EUR"))
+        #expect(expense.needsRate)
+        #expect(Ledger(trip.snapshot).pendingRate.isEmpty)
+        #expect(trip.snapshot.expenses[0].rateIsApproximate)
+
+        #expect(store.applyFetchedRate(quote("0.0274"), to: expense, expected: key, home: "EUR"))
+        #expect(!store.applyFetchedRate(quote("0.0270", source: .cachedFallback), to: expense, expected: key, home: "EUR"))
+        #expect(expense.rate == Decimal(string: "0.0274"))
+    }
+
+    @Test func movingAnExpenseToAnotherDayFetchesItsRateAgain() {
+        let trip = store.createTrip(name: "Bangkok", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0]
+        let expense = store.addExpense(to: trip, ManualExpenseDraft(title: "Taxi", amount: 35_000, currency: "THB", payerID: ann.uuid, weights: [ann.uuid: 1]))
+        store.applyFetchedRate(quote("0.0274"), to: expense, expected: TripStore.RateKey(expense), home: "EUR")
+
+        var sameDay = store.draft(for: expense)
+        sameDay.amount = 40_000
+        store.updateExpense(expense, sameDay)
+        #expect(expense.rate == Decimal(string: "0.0274"))
+
+        var otherDay = store.draft(for: expense)
+        otherDay.date = expense.date.addingTimeInterval(-3 * 86_400)
+        store.updateExpense(expense, otherDay)
+        #expect(expense.rate == nil)
+        #expect(expense.needsRate)
+    }
+}

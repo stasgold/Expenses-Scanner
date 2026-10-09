@@ -107,12 +107,69 @@ enum L10n {
     static var exchangeRate: String { tr("exchange_rate", "Exchange rate") }
     /// "1 THB ="
     static func rateLabel(_ currency: String) -> String { tr("rate_label", "1 %@ =", currency) }
-    static func rateFooter(_ home: String) -> String {
-        tr("rate_footer", "What one unit is worth in %@. Leave it empty and the expense waits for a rate before it counts in balances.", home)
-    }
-    static func rateConverted(_ amount: String) -> String { tr("rate_converted", "That’s %@ at this rate.", amount) }
     static var rateError: String { tr("rate_error", "Enter a rate like 0.92.") }
     static var noRateYet: String { tr("no_rate_yet", "no rate yet") }
+    static var offlineRate: String { tr("offline_rate", "older rate") }
+    static func typedRate(_ amount: String) -> String {
+        tr("typed_rate", "Your rate: that’s %@. Clear it to use the automatic one.", amount)
+    }
+    static func automaticRateFooter(_ day: String, _ amount: String) -> String {
+        tr("automatic_rate_footer", "Central bank rate for %1$@: that’s %2$@. Type your card’s rate to use it instead.", day, amount)
+    }
+    static func offlineRateFooter(_ day: String, _ amount: String) -> String {
+        tr("offline_rate_footer", "Offline: using the saved rate for %1$@ (that’s %2$@) until a fresh one can be fetched.", day, amount)
+    }
+    static var rateLooking: String { tr("rate_looking", "Looking up the rate…") }
+    static var rateUnavailable: String {
+        tr("rate_unavailable", "No rate yet: it’s fetched automatically once you’re online. Until then this expense isn’t counted in balances. You can also type a rate.")
+    }
+    static func approximateRateNotice(_ count: Int) -> String {
+        count == 1
+            ? tr("approximate_rate_notice_one", "1 expense uses an older saved rate until a fresh one can be fetched.")
+            : tr("approximate_rate_notice_other", "%lld expenses use an older saved rate until a fresh one can be fetched.", count)
+    }
+
+    // MARK: Receipts
+
+    static var scanReceipt: String { tr("scan_receipt", "Scan receipt") }
+    static var choosePhoto: String { tr("choose_photo", "Choose photo") }
+    static var enterManually: String { tr("enter_manually", "Enter manually") }
+    static var readingReceipt: String { tr("reading_receipt", "Reading receipt…") }
+    static var readFailedTitle: String { tr("read_failed_title", "Couldn’t read the photo") }
+    static var readFailedMessage: String { tr("read_failed_message", "Try again, or enter the expense manually.") }
+    static var newReceipt: String { tr("new_receipt", "Check receipt") }
+    static var editReceipt: String { tr("edit_receipt", "Edit receipt") }
+    static var receiptPhoto: String { tr("receipt_photo", "Receipt photo") }
+    static var receiptPhotoFooter: String { tr("receipt_photo_footer", "Tap the photo to enlarge it. Tap ⌖ next to a line to find it on the photo.") }
+    static var receiptTitle: String { tr("receipt_title", "Name") }
+    static var receiptTitleHint: String { tr("receipt_title_hint", "Shop or restaurant") }
+    static var items: String { tr("items", "Items") }
+    static var itemName: String { tr("item_name", "Item") }
+    static var addItem: String { tr("add_item", "Add item") }
+    static var noItemsRead: String { tr("no_items_read", "No items could be read. Add them below.") }
+    static var itemsFooter: String {
+        tr("items_footer", "Tap names to say who had each item; shared items are split equally. Swipe a line to delete it.")
+    }
+    static var whoHadWhat: String { tr("who_had_what", "Who had what") }
+    static var everyoneOnAll: String { tr("everyone_on_all", "Everyone shares every item") }
+    static var nobodyOnAll: String { tr("nobody_on_all", "Clear everyone") }
+    static var showOnPhoto: String { tr("show_on_photo", "Show on photo") }
+    static var extras: String { tr("extras", "Tax, tip and discounts") }
+    static var tax: String { tr("tax", "Tax") }
+    static var taxIncluded: String { tr("tax_included", "Already included in prices") }
+    static var tip: String { tr("tip", "Tip") }
+    static var serviceCharge: String { tr("service_charge", "Service charge") }
+    static var discount: String { tr("discount", "Discount") }
+    static var shareExtras: String { tr("share_extras", "Share them") }
+    static var extrasProportional: String { tr("extras_proportional", "By what each had") }
+    static var extrasEqual: String { tr("extras_equal", "Equally") }
+    static var total: String { tr("total", "Total") }
+    static var printedTotal: String { tr("printed_total", "Total on receipt") }
+    static var addsUpTo: String { tr("adds_up_to", "Lines add up to") }
+    static func mismatchWarning(_ amount: String) -> String {
+        tr("mismatch_warning", "%@ difference from the receipt’s total: check for a missed or misread line.", amount)
+    }
+    static var notAssigned: String { tr("not_assigned", "Not assigned yet") }
 
     // MARK: Balances
 

@@ -37,6 +37,8 @@ struct ExpenseSnapshot: Equatable, Identifiable {
     /// One unit of `currency` in the trip's home currency; nil when not known yet.
     var rateToHome: Decimal?
     var input: ExpenseInput
+    /// The rate is an older saved one standing in while offline.
+    var rateIsApproximate = false
 
     /// For a transfer: who received the money.
     var recipient: UUID? {
