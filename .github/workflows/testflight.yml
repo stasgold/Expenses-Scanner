@@ -1,0 +1,118 @@
+name: TestFlight
+
+# Run by hand: Actions › TestFlight › Run workflow.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      # Every upload needs a new build number; the run number only ever goes up.
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          # Secrets pasted from a phone often carry stray spaces, line breaks or a lost header, so rebuild
+          # a clean PEM from whatever base64 is in there and trim the two IDs.
+          python3 - <<'PY'
+          import base64, os, re, sys, textwrap
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+          ids = {name: re.sub(r"\s+", "", os.environ.get(name, "")) for name in ("ASC_KEY_ID", "ASC_ISSUER_ID")}
+          raw = os.environ.get("ASC_KEY_P8", "")
+          missing = [name for name, value in {**ids, "ASC_KEY_P8": raw.strip()}.items() if not value]
+          if missing:
+              fail("Missing repository secrets: " + ", ".join(missing) + " (see README > TestFlight)")
+
+          body = raw.replace("\\n", "\n")
+          body = re.sub(r"-----(BEGIN|END)[A-Z ]*-----", "", body)
+          body = re.sub(r"\s+", "", body)
+          try:
+              base64.b64decode(body, validate=True)
+          except Exception:
+              fail("ASC_KEY_P8 is not a valid .p8 key. Paste the whole file, including the BEGIN/END lines.")
+
+          folder = os.path.join(os.environ["RUNNER_TEMP"], "keys")
+          os.makedirs(folder, exist_ok=True)
+          path = os.path.join(folder, f"AuthKey_{ids['ASC_KEY_ID']}.p8")
+          with open(path, "w") as key:
+              key.write("-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(body, 64)) + "\n-----END PRIVATE KEY-----\n")
+          os.chmod(path, 0o600)
+
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"ASC_KEY_ID={ids['ASC_KEY_ID']}\nASC_ISSUER_ID={ids['ASC_ISSUER_ID']}\nASC_KEY_PATH={path}\n")
+          print(f"Key {ids['ASC_KEY_ID']} installed ({len(body)} base64 characters).")
+          PY
+          openssl pkey -in "$(grep ^ASC_KEY_PATH= "$GITHUB_ENV" | tail -1 | cut -d= -f2-)" -noout \
+            || { echo "::error::ASC_KEY_P8 does not contain a readable private key."; exit 1; }
+
+      - name: Select Xcode 26
+        run: |
+          # App Store Connect only accepts builds made with the iOS 26 SDK or newer.
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then
+            echo "::error::No Xcode 26 on this runner. Installed: $(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ExpensesScanner.xcodeproj \
+            -scheme ExpensesScanner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/ExpensesScanner.xcarchive" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee archive.log | grep -E "error:|warning: .*sign|\*\* ARCHIVE" || true
+          grep -q "\*\* ARCHIVE SUCCEEDED \*\*" archive.log
+
+      - name: Sign and upload to App Store Connect
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/ExpensesScanner.xcarchive" \
+            -exportOptionsPlist ci/ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee export.log
+          grep -qE "EXPORT SUCCEEDED|Upload succeeded" export.log
+          echo "Uploaded build $BUILD_NUMBER. It shows up in App Store Connect › TestFlight after Apple finishes processing (usually 5–30 minutes)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: |
+            archive.log
+            export.log
+
+      - name: Remove API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"

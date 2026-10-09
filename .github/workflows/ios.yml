@@ -1,0 +1,57 @@
+name: iOS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          # App Store Connect only accepts builds made with the iOS 26 SDK or newer.
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then
+            echo "::error::No Xcode 26 on this runner. Installed: $(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          runtimes = sorted((k for k in devices if ".iOS-" in k), key=lambda k: [int(p) for p in k.rsplit("iOS-", 1)[1].split("-")], reverse=True)
+          print(next(d["udid"] for k in runtimes for d in devices[k] if d["name"].startswith("iPhone")))
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project ExpensesScanner.xcodeproj \
+            -scheme ExpensesScanner \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee xcodebuild.log | grep -E "error:|warning:|Test (Suite|Case)|✔|✘|passed|failed|\*\* (BUILD|TEST)" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" xcodebuild.log
+
+      - name: Upload log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
