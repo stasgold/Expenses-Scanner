@@ -187,20 +187,20 @@ struct ReceiptParserTests {
     @Test func hotelFolioWithTheTotalAtTheTop() {
         let receipt = parse("""
         RECEIPT
-        MR./MS. Stanislav Goldberg
+        MR./MS. Alex Morgan
         AMOUNT DUE  ¥17,500
         (consumption tax  ¥1,590)
         Paid by Credit,CREDIT CARD
-        Onyado Nono Asakusa
-        TEL:03-5830-0510
-        Trx#:075002C100904243  2026/10/09 10:53
-        Room No.: 312
-        MR./MS. : STANISLAV GOLDBERG
+        Hotel Sakura Garden
+        TEL:03-0000-0000
+        Trx#:000000A000000000  2026/10/09 10:53
+        Room No.: 214
+        MR./MS. : ALEX MORGAN
         PAX  : 1
         PERIOD  : 10/3/2026 - 10/9/2026
         Usage Details
-        Mr./Ms.  STANISLAV GOLDBERG
-        Room  312
+        Mr./Ms.  ALEX MORGAN
+        Room  214
         Person  1
         Arrive  10/3/2026
         Departure  10/9/2026
@@ -217,12 +217,12 @@ struct ReceiptParserTests {
         * Eligible for the reduced tax rate
         # Nontaxable
         ! Other category
-        Kyoritsu Maintenance Co., Ltd.
-        Registrated Number I1010001014427
-        Trx#:075002C100904243  2026/10/09 10:53
+        Example Hospitality Co., Ltd.
+        Registrated Number T0000000000000
+        Trx#:000000A000000000  2026/10/09 10:53
         """, currency: "EUR")
         #expect(receipt.currency == "JPY")
-        #expect(receipt.merchant == "Onyado Nono Asakusa")
+        #expect(receipt.merchant == "Hotel Sakura Garden")
         #expect(items(receipt) == ["BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=5000"])
         #expect(receipt.total == 17_500)
         #expect(receipt.tax == 1590)
