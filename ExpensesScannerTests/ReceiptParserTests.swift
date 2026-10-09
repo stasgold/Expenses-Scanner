@@ -182,6 +182,78 @@ struct ReceiptParserTests {
         #expect(receipt.mismatch == 98)
     }
 
+    /// A hotel folio: the amount due is printed first, the items in a dated table below it with the card
+    /// payment among them, and room and guest numbers all over. Read from a real receipt photo.
+    @Test func hotelFolioWithTheTotalAtTheTop() {
+        let receipt = parse("""
+        RECEIPT
+        MR./MS. Stanislav Goldberg
+        AMOUNT DUE  ¥17,500
+        (consumption tax  ¥1,590)
+        Paid by Credit,CREDIT CARD
+        Onyado Nono Asakusa
+        TEL:03-5830-0510
+        Trx#:075002C100904243  2026/10/09 10:53
+        Room No.: 312
+        MR./MS. : STANISLAV GOLDBERG
+        PAX  : 1
+        PERIOD  : 10/3/2026 - 10/9/2026
+        Usage Details
+        Mr./Ms.  STANISLAV GOLDBERG
+        Room  312
+        Person  1
+        Arrive  10/3/2026
+        Departure  10/9/2026
+        Date  Description / Charge
+        2026/10/03  BREAKFAST  ¥2,500
+        2026/10/04  BREAKFAST  ¥2,500
+        2026/10/05  BREAKFAST  ¥2,500
+        2026/10/06  BREAKFAST  ¥2,500
+        2026/10/07  BREAKFAST  ¥2,500
+        2026/10/08  CREDIT CARD  -¥17,500
+        2026/10/08  BREAKFAST  ¥5,000
+        Total  ¥17,500
+        (10%Taxable ¥17,500 Includes JCT  ¥1,590)
+        * Eligible for the reduced tax rate
+        # Nontaxable
+        ! Other category
+        Kyoritsu Maintenance Co., Ltd.
+        Registrated Number I1010001014427
+        Trx#:075002C100904243  2026/10/09 10:53
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.merchant == "Onyado Nono Asakusa")
+        #expect(items(receipt) == ["BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=2500", "BREAKFAST=5000"])
+        #expect(receipt.total == 17_500)
+        #expect(receipt.tax == 1590)
+        #expect(receipt.taxIncluded)
+        #expect(receipt.discount == 0)
+        #expect(receipt.mismatch == 0)
+    }
+
+    @Test func totalAtTheTopWithItsLinesBelow() {
+        let receipt = parse("""
+        Invoice
+        Amount due  60.00
+        Room service  25.00
+        Minibar  35.00
+        """)
+        #expect(items(receipt) == ["Room service=2500", "Minibar=3500"])
+        #expect(receipt.total == 6000)
+        #expect(receipt.mismatch == 0)
+    }
+
+    @Test func aBareNumberIsNotAPriceWhenPricesCarryTheSign() {
+        let receipt = parse("""
+        Room  312
+        Tea  ¥450
+        Cake  ¥600
+        Total  ¥1,050
+        """, currency: "JPY")
+        #expect(items(receipt) == ["Tea=450", "Cake=600"])
+        #expect(receipt.mismatch == 0)
+    }
+
     @Test func aMissedLineShowsAsAMismatch() {
         let receipt = parse("""
         Coffee  3.50
@@ -267,6 +339,20 @@ struct ReceiptParserTests {
         #expect(ReceiptParser.detectCurrency(receiptRows("Total  $12.50")) == nil)
         // A three-letter word that happens to be a code only counts next to an amount.
         #expect(ReceiptParser.detectCurrency(receiptRows("ALL DAY BREAKFAST  9.50")) == nil)
+    }
+
+    /// A photo turned slightly: prices on the right sit half a line higher than their names. The text's
+    /// own slope straightens it out.
+    @Test func tiltedPhotosStillPairNamesWithPrices() {
+        let slope = -0.03
+        var pieces: [OCRFragment] = []
+        for (index, (name, price)) in [("BREAKFAST", "¥2,500"), ("DINNER", "¥4,000"), ("TAXI", "¥1,200")].enumerated() {
+            let y = 0.20 + Double(index) * 0.03
+            pieces.append(OCRFragment(text: name, box: OCRBox(x: 0.05, y: y, width: 0.4, height: 0.02), slope: slope))
+            // Same printed line, but further right, so higher up on a photo tilted this way.
+            pieces.append(OCRFragment(text: price, box: OCRBox(x: 0.75, y: y + slope * (0.825 - 0.25), width: 0.15, height: 0.02)))
+        }
+        #expect(LineGrouper.rows(pieces).map(\.text) == ["BREAKFAST ¥2,500", "DINNER ¥4,000", "TAXI ¥1,200"])
     }
 
     @Test func rowsAreRebuiltFromPieces() throws {

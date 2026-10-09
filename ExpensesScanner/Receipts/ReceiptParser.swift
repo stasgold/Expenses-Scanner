@@ -22,6 +22,9 @@ struct OCRBox: Codable, Equatable, Hashable {
 struct OCRFragment: Codable, Equatable {
     var text: String
     var box: OCRBox
+    /// How much the text line rises or falls across the photo (Δy / Δx in normalised units, y down);
+    /// nil when unknown. A tilted photo puts a line's price higher or lower than its name.
+    var slope: Double? = nil
 }
 
 /// One printed line of the receipt: its fragments left to right.
@@ -40,28 +43,41 @@ struct ReceiptRow: Codable, Equatable {
 /**
  * Receipts are two columns (name … price) that the recogniser often returns as separate pieces.
  * Pieces whose vertical centres lie within half a typical line height of each other form one row.
+ * A tilted photo is straightened first: the typical slope of the wider pieces says how far a line
+ * rises across the page, and each piece is compared at the left edge instead of where it sits.
  */
 enum LineGrouper {
     static func rows(_ fragments: [OCRFragment]) -> [ReceiptRow] {
-        let pieces = fragments
-            .filter { !$0.text.trimmed.isEmpty }
-            .sorted { $0.box.midY < $1.box.midY }
+        let pieces = fragments.filter { !$0.text.trimmed.isEmpty }
         guard !pieces.isEmpty else { return [] }
-        let heights = pieces.map(\.box.height).sorted()
+        let skew = skew(of: pieces)
+        func level(_ piece: OCRFragment) -> Double {
+            piece.box.midY - skew * (piece.box.x + piece.box.width / 2)
+        }
+        let sorted = pieces.sorted { level($0) < level($1) }
+        let heights = sorted.map(\.box.height).sorted()
         let tolerance = max(heights[heights.count / 2] * 0.5, 0.002)
 
         var rows: [[OCRFragment]] = []
         var centres: [Double] = []
-        for piece in pieces {
-            if let last = rows.indices.last, abs(centres[last] - piece.box.midY) <= tolerance {
+        for piece in sorted {
+            if let last = rows.indices.last, abs(centres[last] - level(piece)) <= tolerance {
                 rows[last].append(piece)
-                centres[last] = rows[last].map(\.box.midY).reduce(0, +) / Double(rows[last].count)
+                centres[last] = rows[last].map(level).reduce(0, +) / Double(rows[last].count)
             } else {
                 rows.append([piece])
-                centres.append(piece.box.midY)
+                centres.append(level(piece))
             }
         }
         return rows.map { ReceiptRow(fragments: $0.sorted { $0.box.x < $1.box.x }) }
+    }
+
+    /// The median slope of pieces wide enough to measure it; 0 when there are none or it's implausible.
+    static func skew(of pieces: [OCRFragment]) -> Double {
+        let slopes = pieces.filter { $0.box.width >= 0.15 }.compactMap(\.slope).sorted()
+        guard !slopes.isEmpty else { return 0 }
+        let median = slopes[slopes.count / 2]
+        return abs(median) < 0.25 ? median : 0
     }
 }
 
@@ -95,6 +111,16 @@ struct ParsedReceipt: Equatable {
     var computedTotal: Int64 { itemsTotal + (taxIncluded ? 0 : tax) + tip + service - discount }
     /// Printed total minus what the lines add up to; nil without a printed total.
     var mismatch: Int64? { total.map { $0 - computedTotal } }
+
+    // Bookkeeping while reading: where the first item was, and lines used as names for the line below.
+    var firstItemLine: Int?
+    var usedNameLines: Set<Int> = []
+
+    static func == (lhs: ParsedReceipt, rhs: ParsedReceipt) -> Bool {
+        lhs.merchant == rhs.merchant && lhs.date == rhs.date && lhs.currency == rhs.currency && lhs.items == rhs.items
+            && lhs.subtotal == rhs.subtotal && lhs.tax == rhs.tax && lhs.taxIncluded == rhs.taxIncluded && lhs.tip == rhs.tip
+            && lhs.service == rhs.service && lhs.discount == rhs.discount && lhs.total == rhs.total
+    }
 }
 
 /**
@@ -104,7 +130,8 @@ struct ParsedReceipt: Equatable {
  *  2. The decimal separator is decided once per receipt, by which one most prices end with.
  *  3. A row's price is its right-most amount. Its words decide what it is: an item, or a subtotal,
  *     total, tax, tip, service charge, discount or payment line, in about 20 languages.
- *  4. After the total (or the first payment line) only tax breakdowns are read.
+ *  4. The total is whichever printed total the lines add up to, at the bottom or (hotel folios) at the
+ *     top. After it only tax breakdowns are read.
  *  5. Whether tax is added on top or already included is decided by which sum matches the total.
  */
 enum ReceiptParser {
@@ -116,47 +143,102 @@ enum ReceiptParser {
         let style = NumberStyle.detect(tokensByRow.flatMap { $0 }, currencyDigits: Money.minorDigits(currency))
         let scale = Money.scale(currency)
 
-        var result = ParsedReceipt()
-        result.currency = detected
-        result.date = detectDate(rows, now: now)
-
-        var pending: (index: Int, name: String, box: OCRBox?, category: LineCategory?)?
-        var afterTotal = false
-        var taxAfterTotal: Int64 = 0
-        var includedHint = false
-
+        // Pass 1: what each line is.
+        var lines: [Line] = []
         for (index, row) in rows.enumerated() {
-            let tokens = tokensByRow[index]
-            let rowPrice = tokens.last.flatMap { style.value($0, scale: scale) }
+            let price = tokensByRow[index].last.flatMap { style.value($0, scale: scale) }
             let label = normalized(row.text)
             var category = classify(label)
-            if category == .tax && containsAny(label, includedMarkers) { includedHint = true }
-            let adjacent = pending.flatMap { $0.index == index - 1 ? $0 : nil }
-            defer { if rowPrice != nil { pending = nil } }
-
-            if afterTotal {
-                if category == .tax, let rowPrice { taxAfterTotal += abs(rowPrice) }
-                continue
-            }
-            guard let price = rowPrice else {
-                let name = cleanName(row.text)
-                if result.merchant == nil, result.items.isEmpty, category == nil, letterCount(name) >= 3 {
-                    result.merchant = name
-                }
-                pending = (index, name, row.box, category)
-                continue
-            }
+            let name = cleanName(row.text)
             // "TOTAL" on one line and the amount on the next.
-            if category == nil, letterCount(cleanName(row.text)) < 2, let adjacent, adjacent.category != nil {
-                category = adjacent.category
+            if category == nil, price != nil, letterCount(name) < 2,
+               let above = lines.last, above.price == nil, above.category != nil {
+                category = above.category
             }
+            lines.append(Line(
+                index: index, text: row.text, price: price, category: category, name: name, box: row.box,
+                saysIncluded: category == .tax && containsAny(label, includedMarkers)
+            ))
+        }
 
-            switch category {
+        // Pass 2: which printed total the lines belong to. Most receipts end with it; hotel folios and
+        // some invoices print it first ("AMOUNT DUE" at the top). Every total is tried both ways and the
+        // reading whose lines add up best wins.
+        let totals = lines.filter { $0.category == .total && $0.price != nil }.map(\.index)
+        let payments = lines.filter { $0.category == .payment && $0.price != nil }.map(\.index)
+        func stop(after start: Int) -> Int {
+            ((totals + payments).filter { $0 > start } + [lines.count]).min() ?? lines.count
+        }
+        var readings: [Reading] = []
+        if totals.isEmpty {
+            let end = payments.first ?? lines.count
+            readings.append(Reading(range: 0..<end, total: nil, tail: end, footer: true))
+        }
+        for index in totals {
+            readings.append(Reading(range: 0..<index, total: lines[index].price.map(abs), tail: index, footer: true))
+            readings.append(Reading(range: (index + 1)..<max(index + 1, stop(after: index)), total: lines[index].price.map(abs), tail: stop(after: index), footer: false))
+        }
+        let scored = readings.map { reading -> (reading: Reading, receipt: ParsedReceipt, gap: Int64) in
+            var receipt = collect(lines, in: reading.range)
+            receipt.total = reading.total
+            // How far the lines are from the total, with the tax either inside the prices or on top.
+            let gap = reading.total.map { total -> Int64 in
+                let base = receipt.itemsTotal + receipt.tip + receipt.service - receipt.discount
+                return min(abs(total - base), abs(total - base - receipt.tax))
+            } ?? 0
+            return (reading, receipt, gap)
+        }
+        guard let best = scored.min(by: { a, b in
+            if a.gap != b.gap { return a.gap < b.gap }
+            if a.receipt.items.count != b.receipt.items.count { return a.receipt.items.count > b.receipt.items.count }
+            if a.reading.footer != b.reading.footer { return a.reading.footer }
+            return a.reading.tail > b.reading.tail
+        }) else { return ParsedReceipt() }
+
+        var result = best.receipt
+        result.currency = detected
+        result.date = detectDate(rows, now: now)
+        result.merchant = merchant(lines, before: best.receipt.firstItemLine ?? lines.count, skipping: best.receipt.usedNameLines)
+        // After the total only tax breakdowns are read ("davon MwSt 19% 0,97").
+        let taxAfterTotal = lines.filter { $0.index > best.reading.tail && $0.category == .tax }.compactMap(\.price).map(abs).reduce(0, +)
+        let includedHint = lines.contains(where: \.saysIncluded)
+        resolveTax(&result, taxAfterTotal: taxAfterTotal, includedHint: includedHint)
+        return result
+    }
+
+    /// One receipt line as pass 1 understood it.
+    private struct Line {
+        var index: Int
+        var text: String
+        var price: Int64?
+        var category: LineCategory?
+        var name: String
+        var box: OCRBox?
+        /// A tax line saying the tax is already inside the prices ("incl.", "内").
+        var saysIncluded: Bool
+    }
+
+    /// A way to read the receipt: these lines are its items, and this is their total.
+    private struct Reading {
+        var range: Range<Int>
+        var total: Int64?
+        /// The line after which only tax breakdowns follow.
+        var tail: Int
+        /// The total comes after its lines (the usual way) rather than before them.
+        var footer: Bool
+    }
+
+    /// Items and extras from the lines in `range`. Totals and payment lines inside it are skipped.
+    private static func collect(_ lines: [Line], in range: Range<Int>) -> ParsedReceipt {
+        var result = ParsedReceipt()
+        for line in lines[range] {
+            guard let price = line.price else { continue }
+            let above = line.index > range.lowerBound && lines[line.index - 1].price == nil ? lines[line.index - 1] : nil
+            switch line.category {
             case .subtotal?:
                 result.subtotal = abs(price)
-            case .total?:
-                if result.total == nil { result.total = abs(price) }
-                afterTotal = true
+            case .total?, .payment?:
+                continue
             case .tax?:
                 result.tax += abs(price)
             case .tip?:
@@ -165,11 +247,9 @@ enum ReceiptParser {
                 result.service += abs(price)
             case .discount?:
                 result.discount += abs(price)
-            case .payment?:
-                afterTotal = true
             case nil:
                 // "2 x 1,49" under the item it belongs to.
-                if let quantity = quantityOnly(row.text), adjacent == nil, !result.items.isEmpty {
+                if let quantity = quantityOnly(line.text), above == nil, !result.items.isEmpty {
                     result.items[result.items.count - 1].quantity = quantity
                     continue
                 }
@@ -177,21 +257,41 @@ enum ReceiptParser {
                     result.discount += -price
                     continue
                 }
-                var name = cleanName(row.text)
-                var box = row.box
-                // Name on one line, quantity and price on the next.
-                if letterCount(name) < 2, let adjacent, adjacent.category == nil, letterCount(adjacent.name) >= 2 {
-                    name = adjacent.name
-                    box = [adjacent.box, row.box].compactMap { $0 }.reduce(OCRBox?.none) { $0?.union($1) ?? $1 }
-                    if result.merchant == adjacent.name && result.items.isEmpty { result.merchant = nil }
-                }
                 guard price != 0 else { continue }
-                result.items.append(ParsedItem(name: name, amount: price, quantity: quantity(in: row.text), box: box))
+                var name = line.name
+                var box = line.box
+                var firstLine = line.index
+                // Name on one line, quantity and price on the next.
+                if letterCount(name) < 2, let above, above.category == nil, letterCount(above.name) >= 2 {
+                    name = above.name
+                    box = [above.box, line.box].compactMap { $0 }.reduce(OCRBox?.none) { $0?.union($1) ?? $1 }
+                    result.usedNameLines.insert(above.index)
+                    firstLine = above.index
+                }
+                if result.firstItemLine == nil { result.firstItemLine = firstLine }
+                result.items.append(ParsedItem(name: name, amount: price, quantity: quantity(in: line.text), box: box))
             }
         }
-
-        resolveTax(&result, taxAfterTotal: taxAfterTotal, includedHint: includedHint)
         return result
+    }
+
+    /// Words like "Receipt" and guest-name lines head many receipts; the shop's name is the first line
+    /// that is neither.
+    private static let notMerchants: Set<String> = [
+        "receipt", "invoice", "tax invoice", "bill", "check", "quittung", "rechnung", "beleg", "kassenbon", "recibo",
+        "ricevuta", "scontrino", "facture", "ticket", "recu", "bon", "paragon", "fis", "hoa đon", "領収書", "領収証",
+        "レシート", "收据", "发票", "영수증", "ใบเสร็จรับเงิน", "usage details", "copy", "customer copy",
+    ]
+
+    private static func merchant(_ lines: [Line], before end: Int, skipping used: Set<Int>) -> String? {
+        for line in lines.prefix(end) where line.price == nil && line.category == nil && !used.contains(line.index) {
+            let name = line.name
+            let key = normalized(name).trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            guard letterCount(name) >= 3, !notMerchants.contains(key) else { continue }
+            if key.range(of: #"^(mr|ms|mrs|miss|guest|name)\b"#, options: .regularExpression) != nil { continue }
+            return name
+        }
+        return nil
     }
 
     /// Tax added on top (US, Thai service + VAT) or already in the prices (EU, Japan): whichever sum
@@ -382,9 +482,15 @@ enum ReceiptParser {
         /// Decimals printed on prices: the currency's, or 0 when prices are printed in whole units
         /// (yen, or "25.000" rupiah).
         var decimals: Int
+        /// Whole-unit prices on this receipt carry a currency sign ("¥2,500"), so a bare "312" is a room
+        /// or ticket number, not a price.
+        var marksRequired = false
 
         static func detect(_ tokens: [MoneyToken], currencyDigits: Int) -> NumberStyle {
-            guard currencyDigits > 0 else { return NumberStyle(decimalSeparator: ".", decimals: 0) }
+            let marked = tokens.filter(\.marked).count
+            let bare = tokens.filter { !$0.marked && $0.core.filter(\.isNumber).count >= 3 }.count
+            let marksRequired = marked >= 2 && marked >= bare
+            guard currencyDigits > 0 else { return NumberStyle(decimalSeparator: ".", decimals: 0, marksRequired: marksRequired) }
             var dots = 0
             var commas = 0
             for token in tokens {
@@ -394,7 +500,7 @@ enum ReceiptParser {
                 if token.core[separator] == "." { dots += 1 } else { commas += 1 }
             }
             if dots + commas == 0 {
-                return NumberStyle(decimalSeparator: ".", decimals: 0)
+                return NumberStyle(decimalSeparator: ".", decimals: 0, marksRequired: marksRequired)
             }
             return NumberStyle(decimalSeparator: commas > dots ? "," : ".", decimals: currencyDigits)
         }
@@ -416,7 +522,7 @@ enum ReceiptParser {
             guard let whole = Self.groupedInteger(integerPart) else { return nil }
             // In whole units (yen, won, rupiah) a bare "1", "9" or "10" is a count, a day or a seat, not a
             // price; real prices there have three digits or a currency sign.
-            if decimals == 0 && !token.marked && core.filter(\.isNumber).count < 3 { return nil }
+            if decimals == 0 && !token.marked && (marksRequired || core.filter(\.isNumber).count < 3) { return nil }
             let fractionValue = Int64(fraction) ?? 0
             let minor: Int64
             if decimals > 0 {

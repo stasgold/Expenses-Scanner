@@ -37,7 +37,7 @@ enum ReceiptScanner {
                 var box = piece.box
                 box.y = start + box.y * share
                 box.height *= share
-                fragments.append(OCRFragment(text: piece.text, box: box))
+                fragments.append(OCRFragment(text: piece.text, box: box, slope: piece.slope.map { $0 * share }))
             }
             offset += page.size.height
         }
@@ -66,9 +66,13 @@ enum ReceiptScanner {
             return (request.results ?? []).compactMap { observation -> OCRFragment? in
                 guard let candidate = observation.topCandidates(1).first else { return nil }
                 let box = observation.boundingBox
+                // The text's own corners show how the line is tilted (origin bottom left, so flip the sign).
+                let run = observation.topRight.x - observation.topLeft.x
+                let slope = run > 0.02 ? -Double(observation.topRight.y - observation.topLeft.y) / Double(run) : nil
                 return OCRFragment(
                     text: candidate.string,
-                    box: OCRBox(x: box.minX, y: 1 - box.maxY, width: box.width, height: box.height)
+                    box: OCRBox(x: box.minX, y: 1 - box.maxY, width: box.width, height: box.height),
+                    slope: slope
                 )
             }
         }.value
