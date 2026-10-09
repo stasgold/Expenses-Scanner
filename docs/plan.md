@@ -1,5 +1,8 @@
 # Expenses Scanner: plan
 
+> **Progress:** stages 1 (foundations), 2 (currencies) and 3 (scanning) are built and tested; see the README.
+> Scanning came with a first version of per-item assignment (a chip per person on each line).
+
 Photograph a receipt, let the phone read the items and translate them into your language, assign each
 item to the people who had it, and see who owes whom in one currency, even when the receipt was in another. This document is the plan only;
 nothing here is built yet.

@@ -13,19 +13,30 @@ The full plan (features, data model, OCR, translation, rate caching, testing, mi
 
 ## Status
 
-**Stage 1 (foundations)** is in place:
+**Stages 1–3** are in place: trips and balances, exchange rates, and receipt scanning.
 
 - **Trips** with a home currency and the people on them. Swipe a trip to rename or delete it.
-- **Expenses** typed in: title, amount, currency, date, who paid, and who shares it. Steppers give
-  someone 2 shares (counts double) or 0 (left out); the editor shows each person's part as you type.
-- **Other currencies** with a rate you type in (fetched rates come in stage 2). Without a rate an
-  expense waits and is left out of balances, with a notice.
-- **Balances** in the home currency: what each person paid, their share, and their net. **Settle up**
-  lists the fewest payments that make everyone even; *Mark as paid* records one.
-- **Share** a trip as plain text: balances, payments to make, and every expense.
+- **Scan a receipt** with the camera (edges found and straightened, several pages for a long one) or
+  **choose a photo**. The phone reads it: items, quantities, subtotal, tax (added on top or already
+  included), tip, service charge, discounts, the total, the currency and the date, in about 20 languages
+  and with either decimal style.
+- **Check it** before saving: the photo (tap ⌖ beside a line to see where it was read), every line
+  editable, a chip per person to say who had what (everyone, until you change it), the extras shared by
+  what each person had or equally, a warning when the lines don't add up to the receipt's total, and each
+  person's share. Saved receipts reopen in the same screen.
+- **Typed-in expenses** for everything without a receipt: amount, currency, date, who paid, and shares
+  (2 counts double, 0 leaves someone out).
+- **Exchange rates fetched automatically** for each expense's day: European Central Bank rates via
+  Frankfurter, and fawazahmed0's currency-api for the currencies the ECB doesn't publish (VND and ~170
+  more). Saved on the phone: past days are never fetched twice, today's are refreshed after 12 hours, and
+  offline the nearest saved day stands in (marked "older rate") until a fresh one arrives. A rate you type
+  yourself (say, your card's) always wins.
+- **Balances** in the home currency: paid, share and net per person, the fewest payments to settle up,
+  and *Mark as paid*.
+- **Share** a trip as plain text.
 
-Next: fetched and cached exchange rates (stage 2), receipt scanning (3), translation (4), assigning
-items (5).
+Next: translating the bill (stage 4) and finer item assignment (stage 5: shares per item, tap a person
+then their items).
 
 ## How the maths stays exact
 
@@ -80,12 +91,19 @@ ExpensesScanner/
 │   ├── Money.swift                Minor units, currency decimals, formatting, parsing, conversion
 │   ├── Split.swift                Largest-remainder splitting, tax/tip/discount sharing, conversion of shares
 │   ├── Ledger.swift               Snapshots, balances, settle-up payments
+│   ├── ReceiptDraft.swift         A scanned receipt being checked
 │   └── TripShareFormatter.swift   Plain-text export
-├── Views/                         Trips list, trip (expenses | balances), expense editor, people, settings
+├── Receipts/
+│   ├── ReceiptScanner.swift       Document camera, Vision text recognition, page stacking
+│   └── ReceiptParser.swift        Rows from text positions; items, extras, total, currency, date
+├── Rates/
+│   ├── ExchangeRates.swift        Providers (Frankfurter, currency-api), cache, rate service
+│   └── RateUpdater.swift          Fills in rates for expenses waiting for one
+├── Views/                         Trips, trip (expenses | balances), receipt check, expense editor, people
 ├── Theme/ParticipantPalette.swift The eight person colours (light + dark), shared with Total Scoreboard
 ├── Localization/L10n.swift        Every user-facing string, English fallback
 └── Resources/                     Asset catalog (icon, accent colour)
-ExpensesScannerTests/              Money, split, ledger, store, share-text and migration tests (Swift Testing)
+ExpensesScannerTests/              Money, split, ledger, rates, receipt parsing, Vision end-to-end, store, migration
 tools/make_app_icon.py             Draws the app icon (pip install pillow)
 ```
 
