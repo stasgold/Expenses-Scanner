@@ -87,7 +87,8 @@ struct TripStoreTests {
         let ann = trip.orderedParticipants[0]
         let expense = store.addExpense(to: trip, draft(1000, paidBy: ann, weights: [ann: 1], currency: "THB"))
         // As if stage 2 had fetched it.
-        expense.rate = try #require(Decimal(string: "0.0256"))
+        let fetched = try #require(Decimal(string: "0.0256"))
+        expense.rate = fetched
         expense.rateSource = .provider
 
         var sameCurrency = store.draft(for: expense)
