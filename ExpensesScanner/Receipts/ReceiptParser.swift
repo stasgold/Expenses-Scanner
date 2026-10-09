@@ -288,7 +288,9 @@ enum ReceiptParser {
             let name = line.name
             let key = normalized(name).trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
             guard letterCount(name) >= 3, !notMerchants.contains(key) else { continue }
-            if key.range(of: #"^(mr|ms|mrs|miss|guest|name)\b"#, options: .regularExpression) != nil { continue }
+            // The raw text too: "MR./MS." is dropped from the name for its slash.
+            let guest = #"^(mr|ms|mrs|miss|guest|name)\b"#
+            if [key, normalized(line.text)].contains(where: { $0.range(of: guest, options: .regularExpression) != nil }) { continue }
             return name
         }
         return nil
