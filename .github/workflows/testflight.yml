@@ -33,11 +33,22 @@ jobs:
               print(f"::error::{message}")
               sys.exit(1)
 
-          ids = {name: re.sub(r"\s+", "", os.environ.get(name, "")) for name in ("ASC_KEY_ID", "ASC_ISSUER_ID")}
+          # Keep only characters an ID can contain: drops spaces, line breaks, quotes and the invisible
+          # characters (zero-width or non-breaking spaces) that phone keyboards and copy-paste slip in.
+          ids = {name: re.sub(r"[^A-Za-z0-9-]", "", os.environ.get(name, "")) for name in ("ASC_KEY_ID", "ASC_ISSUER_ID")}
           raw = os.environ.get("ASC_KEY_P8", "")
           missing = [name for name, value in {**ids, "ASC_KEY_P8": raw.strip()}.items() if not value]
           if missing:
               fail("Missing repository secrets: " + ", ".join(missing) + " (see README > TestFlight)")
+          for name in ids:
+              dropped = len(os.environ.get(name, "")) - len(ids[name])
+              if dropped:
+                  print(f"{name}: removed {dropped} stray character(s).")
+          if not re.fullmatch(r"[A-Z0-9]{8,12}", ids["ASC_KEY_ID"]):
+              fail(f"ASC_KEY_ID should be the key's ID, about 10 capital letters and digits; got {len(ids['ASC_KEY_ID'])} characters.")
+          if not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", ids["ASC_ISSUER_ID"]):
+              fail("ASC_ISSUER_ID should be the Issuer ID shown above the keys list, like 1a2b3c4d-1234-5678-9abc-1234567890ab "
+                   f"(not the Team ID); got {len(ids['ASC_ISSUER_ID'])} characters.")
 
           body = raw.replace("\\n", "\n")
           body = re.sub(r"-----(BEGIN|END)[A-Z ]*-----", "", body)
