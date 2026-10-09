@@ -5,6 +5,8 @@ struct ExpenseEditorSheet: View {
     let isNew: Bool
     let participants: [ParticipantSnapshot]
     let homeCurrency: CurrencyCode
+    /// Set when editing a saved expense: deletes it.
+    let onDelete: (() -> Void)?
     let onSave: (ManualExpenseDraft) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -22,11 +24,13 @@ struct ExpenseEditorSheet: View {
         participants: [ParticipantSnapshot],
         homeCurrency: CurrencyCode,
         draft: ManualExpenseDraft,
+        onDelete: (() -> Void)? = nil,
         onSave: @escaping (ManualExpenseDraft) -> Void
     ) {
         self.isNew = isNew
         self.participants = participants
         self.homeCurrency = homeCurrency
+        self.onDelete = onDelete
         self.onSave = onSave
         _draft = State(initialValue: draft)
         _amountText = State(initialValue: draft.amount > 0 ? Money.editableText(draft.amount, draft.currency) : "")
@@ -66,6 +70,15 @@ struct ExpenseEditorSheet: View {
                     }
                 }
                 splitSection
+                if let onDelete {
+                    DeleteSection(
+                        title: L10n.deleteExpense,
+                        message: L10n.deleteExpenseMessage(draft.title.trimmed.isEmpty ? L10n.untitledExpense : draft.title.trimmed)
+                    ) {
+                        onDelete()
+                        dismiss()
+                    }
+                }
             }
             .navigationTitle(isNew ? L10n.newExpense : L10n.editExpense)
             .navigationBarTitleDisplayMode(.inline)

@@ -70,3 +70,28 @@ extension Money {
         "\(currency) · \(name(currency))"
     }
 }
+
+/// The red delete button at the bottom of an editor. Asks first: a deleted receipt can't be brought back.
+struct DeleteSection: View {
+    let title: String
+    let message: String
+    let onDelete: () -> Void
+
+    @State private var confirming = false
+
+    var body: some View {
+        Section {
+            Button(role: .destructive) {
+                confirming = true
+            } label: {
+                Label(title, systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .confirmationDialog(title, isPresented: $confirming, titleVisibility: .visible) {
+            Button(L10n.delete, role: .destructive, action: onDelete)
+        } message: {
+            Text(message)
+        }
+    }
+}

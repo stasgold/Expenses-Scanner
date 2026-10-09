@@ -10,6 +10,8 @@ struct ReceiptEditorView: View {
     let homeCurrency: CurrencyCode
     /// Remembers the language picked here for the trip's next receipts.
     let onTargetLanguage: (String?) -> Void
+    /// Set when editing a saved receipt: deletes it.
+    let onDelete: (() -> Void)?
     let onSave: (ReceiptExpenseDraft) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -36,12 +38,14 @@ struct ReceiptEditorView: View {
         draft: ReceiptExpenseDraft,
         targetLanguage: String?,
         onTargetLanguage: @escaping (String?) -> Void,
+        onDelete: (() -> Void)? = nil,
         onSave: @escaping (ReceiptExpenseDraft) -> Void
     ) {
         self.isNew = isNew
         self.participants = participants
         self.homeCurrency = homeCurrency
         self.onTargetLanguage = onTargetLanguage
+        self.onDelete = onDelete
         self.onSave = onSave
         _draft = State(initialValue: draft)
         _targetLanguage = State(initialValue: targetLanguage)
@@ -69,6 +73,15 @@ struct ReceiptEditorView: View {
                 totalSection
                 if isForeign {
                     RateSection(currency: draft.currency, homeCurrency: homeCurrency, date: draft.date, amount: draft.input.total, rateText: $rateText)
+                }
+                if let onDelete {
+                    DeleteSection(
+                        title: L10n.deleteReceipt,
+                        message: L10n.deleteExpenseMessage(draft.title.trimmed.isEmpty ? L10n.untitledExpense : draft.title.trimmed)
+                    ) {
+                        onDelete()
+                        dismiss()
+                    }
                 }
             }
             .navigationTitle(isNew ? L10n.newReceipt : L10n.editReceipt)

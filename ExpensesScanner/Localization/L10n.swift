@@ -82,6 +82,7 @@ enum L10n {
     static var newExpense: String { tr("new_expense", "New expense") }
     static var editExpense: String { tr("edit_expense", "Edit expense") }
     static var deleteExpense: String { tr("delete_expense", "Delete expense") }
+    static var deleteReceipt: String { tr("delete_receipt", "Delete receipt") }
     static func deleteExpenseMessage(_ title: String) -> String {
         tr("delete_expense_message", "“%@” will be permanently deleted.", title)
     }

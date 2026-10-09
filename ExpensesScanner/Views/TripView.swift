@@ -138,7 +138,8 @@ struct TripView: View {
                 homeCurrency: trip.homeCurrency,
                 draft: session.draft,
                 targetLanguage: trip.targetLanguage,
-                onTargetLanguage: { store.setTargetLanguage(trip, $0) }
+                onTargetLanguage: { store.setTargetLanguage(trip, $0) },
+                onDelete: deleteAction(session.expenseID, in: trip)
             ) { draft in
                 if let id = session.expenseID, let expense = trip.orderedExpenses.first(where: { $0.uuid == id }) {
                     store.updateReceipt(expense, draft)
@@ -273,7 +274,8 @@ struct TripView: View {
                     isNew: false,
                     participants: participants,
                     homeCurrency: trip.homeCurrency,
-                    draft: store.draft(for: expense)
+                    draft: store.draft(for: expense),
+                    onDelete: { store.deleteExpense(expense) }
                 ) { draft in
                     store.updateExpense(expense, draft)
                 }
@@ -282,6 +284,16 @@ struct TripView: View {
     }
 
     // MARK: Actions
+
+    /// Deletes a saved expense from its editor; nil for one not saved yet (Cancel discards it).
+    private func deleteAction(_ id: UUID?, in trip: Trip) -> (() -> Void)? {
+        guard let id else { return nil }
+        return {
+            if let expense = trip.orderedExpenses.first(where: { $0.uuid == id }) {
+                store.deleteExpense(expense)
+            }
+        }
+    }
 
     /// Receipts open in the receipt editor, typed-in expenses in theirs; transfers aren't edited.
     private func open(_ expense: ExpenseSnapshot, in trip: Trip) {
