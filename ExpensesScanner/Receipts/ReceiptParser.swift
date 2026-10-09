@@ -27,6 +27,9 @@ struct OCRFragment: Codable, Equatable {
 /// One printed line of the receipt: its fragments left to right.
 struct ReceiptRow: Codable, Equatable {
     var fragments: [OCRFragment]
+    /// The line's words in another language, and which one (BCP 47).
+    var translation: String?
+    var translationLanguage: String?
 
     var text: String { fragments.map(\.text).joined(separator: " ") }
     var box: OCRBox? {
@@ -182,6 +185,7 @@ enum ReceiptParser {
                     box = [adjacent.box, row.box].compactMap { $0 }.reduce(OCRBox?.none) { $0?.union($1) ?? $1 }
                     if result.merchant == adjacent.name && result.items.isEmpty { result.merchant = nil }
                 }
+                guard price != 0 else { continue }
                 result.items.append(ParsedItem(name: name, amount: price, quantity: quantity(in: row.text), box: box))
             }
         }
@@ -325,7 +329,14 @@ enum ReceiptParser {
     struct MoneyToken: Equatable {
         var core: String
         var negative: Bool
+        /// Written with a currency sign or word: "¥670", "1,200円", "EUR 12.50" (attached).
+        var marked = false
     }
+
+    /// Currency words that may be attached to an amount ("1,200円", "Rp25.000", "12,50zł").
+    private static let currencyWords: Set<String> = [
+        "円", "元", "원", "บาท", "zł", "Kč", "Ft", "лв", "RMB", "Rp", "RM", "Rs", "kr", "Kr", "lei", "Fr", "đ",
+    ]
 
     /// Every amount-like token in a line, left to right: "12,50", "€8.00", "-2.00", "3.50-", "(1.20)",
     /// "12.50EUR". Percentages, times, dates and codes with letters inside are not amounts.
@@ -342,13 +353,26 @@ enum ReceiptParser {
         guard core.allSatisfy({ ($0.isASCII && $0.isNumber) || $0 == "." || $0 == "," || $0 == "'" }) else { return nil }
         let prefix = token[..<first]
         let suffix = token[token.index(after: last)...]
-        // Only symbols, signs and currency letters may surround the number: "x2" or "A12" are not amounts…
-        // but "12.50A" (a VAT class) and "EUR12.50" are.
         guard prefix.count <= 4, suffix.count <= 4 else { return nil }
-        guard !prefix.contains(where: { $0.isLetter }) || prefix.filter(\.isLetter).count >= 2 else { return nil }
+        // Letters around the number must be a currency ("EUR12.50", "1,200円") or, after it, a VAT class
+        // ("12.50A"). Anything else makes it something other than an amount: "x2", "A12", "9日", "330ml".
+        let prefixLetters = String(prefix.filter(\.isLetter))
+        let suffixLetters = String(suffix.filter(\.isLetter))
+        let prefixCurrency = isCurrencyWord(prefixLetters)
+        let suffixCurrency = isCurrencyWord(suffixLetters)
+        guard prefixLetters.isEmpty || prefixCurrency else { return nil }
+        let vatClass = suffixLetters.count == 1 && suffixLetters.first.map { $0.isASCII && $0.isUppercase } == true
+        guard suffixLetters.isEmpty || suffixCurrency || vatClass else { return nil }
+        let marked = prefixCurrency || suffixCurrency
+            || prefix.contains(where: \.isCurrencySymbol) || suffix.contains(where: \.isCurrencySymbol)
         let negative = prefix.contains("-") || prefix.contains("−") || suffix.contains("-") || suffix.contains("−")
             || (prefix.contains("(") && suffix.contains(")"))
-        return MoneyToken(core: core, negative: negative)
+        return MoneyToken(core: core, negative: negative, marked: marked)
+    }
+
+    private static func isCurrencyWord(_ letters: String) -> Bool {
+        guard !letters.isEmpty else { return false }
+        return currencyWords.contains(letters) || (letters.count == 3 && letters == letters.uppercased() && currencyCodes.contains(letters))
     }
 
     /// How a receipt writes its amounts.
@@ -390,6 +414,9 @@ enum ReceiptParser {
                 guard fraction.count == decimals, fraction.allSatisfy(\.isNumber) else { return nil }
             }
             guard let whole = Self.groupedInteger(integerPart) else { return nil }
+            // In whole units (yen, won, rupiah) a bare "1", "9" or "10" is a count, a day or a seat, not a
+            // price; real prices there have three digits or a currency sign.
+            if decimals == 0 && !token.marked && core.filter(\.isNumber).count < 3 { return nil }
             let fractionValue = Int64(fraction) ?? 0
             let minor: Int64
             if decimals > 0 {

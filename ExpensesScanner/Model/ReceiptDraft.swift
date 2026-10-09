@@ -11,6 +11,9 @@ struct ReceiptItemDraft: Identifiable, Equatable {
     var box: OCRBox?
     /// Who had it: 1 is a normal share, 2 counts double; missing or 0 means not them.
     var weights: [UUID: Int]
+    /// The name in the reader's language, and which one (BCP 47).
+    var translatedName: String?
+    var translatedLanguage: String?
 }
 
 /// A scanned (or scanned and edited) receipt before it is saved.
@@ -32,8 +35,10 @@ struct ReceiptExpenseDraft: Equatable {
     var rateToHome: Decimal?
     /// JPEG of the receipt.
     var photo: Data?
-    /// The lines as read, kept for re-reading in another currency and for translating later.
+    /// The lines as read, kept for re-reading in another currency and for the translated receipt.
     var rows: [ReceiptRow] = []
+    /// The language the receipt is written in (BCP 47), once known.
+    var sourceLanguage: String?
 
     init(currency: CurrencyCode) {
         self.currency = currency

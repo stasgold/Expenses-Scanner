@@ -151,6 +151,37 @@ struct ReceiptParserTests {
         #expect(receipt.mismatch == 0)
     }
 
+    /// A Japanese train ticket receipt: only the two ¥ amounts are prices. Ticket counts, the day of
+    /// the month and other small numbers printed beside the text are not.
+    @Test func trainTicketReceiptKeepsOnlyRealPrices() {
+        let receipt = parse("""
+        取引内容：お買上  ¥8,360
+        商場者：。（一種発券業務）  0
+        1
+        東京都内→京都市内  9
+        取引内容：お買上  ¥4,960
+        商品名：自由席券  1
+        9日東京・品川→京都  10
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.items.map(\.amount) == [8360, 4960])
+        #expect(receipt.items.map(\.name) == ["取引内容：お買上", "取引内容：お買上"])
+    }
+
+    /// The cost of skipping bare small numbers: a ¥98 item printed without a sign is missed, and the
+    /// total check shows exactly that gap so it can be added by hand.
+    @Test func wholeUnitPricesWithoutASignNeedThreeDigits() {
+        let receipt = parse("""
+        おにぎり  150
+        ガム  98
+        袋  3
+        合計  248
+        """, currency: "JPY")
+        #expect(items(receipt) == ["おにぎり=150"])
+        #expect(receipt.total == 248)
+        #expect(receipt.mismatch == 98)
+    }
+
     @Test func aMissedLineShowsAsAMismatch() {
         let receipt = parse("""
         Coffee  3.50
@@ -172,14 +203,16 @@ struct ReceiptParserTests {
     // MARK: Pieces
 
     @Test(arguments: [
-        ("12.50", "12.50", false), ("€8.00", "8.00", false), ("-2.00", "2.00", true), ("3.50-", "3.50", true),
-        ("(1.20)", "1.20", true), ("12.50EUR", "12.50", false), ("EUR12.50", "12.50", false), ("¥1,200", "1,200", false),
+        ("12.50", "12.50", false, false), ("€8.00", "8.00", false, true), ("-2.00", "2.00", true, false),
+        ("3.50-", "3.50", true, false), ("(1.20)", "1.20", true, false), ("12.50EUR", "12.50", false, true),
+        ("EUR12.50", "12.50", false, true), ("¥1,200", "1,200", false, true), ("1,200円", "1,200", false, true),
+        ("12.50A", "12.50", false, false), ("Rp25.000", "25.000", false, true),
     ])
-    func amountTokens(token: String, core: String, negative: Bool) {
-        #expect(ReceiptParser.moneyToken(token) == ReceiptParser.MoneyToken(core: core, negative: negative))
+    func amountTokens(token: String, core: String, negative: Bool, marked: Bool) {
+        #expect(ReceiptParser.moneyToken(token) == ReceiptParser.MoneyToken(core: core, negative: negative, marked: marked))
     }
 
-    @Test(arguments: ["19%", "12:30", "A12", "x2", "10/08/2026", "Burger", "4/2"])
+    @Test(arguments: ["19%", "12:30", "A12", "x2", "10/08/2026", "Burger", "4/2", "9日", "330ml", "2枚", "No12"])
     func notAmounts(token: String) {
         #expect(ReceiptParser.moneyToken(token) == nil)
     }

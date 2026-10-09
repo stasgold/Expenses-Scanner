@@ -198,18 +198,26 @@ struct ParticipantsSheet: View {
 struct TripSettingsSheet: View {
     let originalCurrency: CurrencyCode
     let hasExpenses: Bool
-    let onSave: (_ name: String, _ homeCurrency: CurrencyCode) -> Void
+    let onSave: (_ name: String, _ homeCurrency: CurrencyCode, _ targetLanguage: String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var currency: CurrencyCode
+    @State private var targetLanguage: String?
 
-    init(name: String, homeCurrency: CurrencyCode, hasExpenses: Bool, onSave: @escaping (_ name: String, _ homeCurrency: CurrencyCode) -> Void) {
+    init(
+        name: String,
+        homeCurrency: CurrencyCode,
+        targetLanguage: String?,
+        hasExpenses: Bool,
+        onSave: @escaping (_ name: String, _ homeCurrency: CurrencyCode, _ targetLanguage: String?) -> Void
+    ) {
         originalCurrency = homeCurrency
         self.hasExpenses = hasExpenses
         self.onSave = onSave
         _name = State(initialValue: name)
         _currency = State(initialValue: homeCurrency)
+        _targetLanguage = State(initialValue: targetLanguage)
     }
 
     var body: some View {
@@ -234,6 +242,15 @@ struct TripSettingsSheet: View {
                         Text(L10n.homeCurrencyFooter)
                     }
                 }
+                Section {
+                    NavigationLink {
+                        LanguagePicker(selection: $targetLanguage)
+                    } label: {
+                        LabeledContent(L10n.translateTo, value: Languages.name(Languages.language(targetLanguage)))
+                    }
+                } footer: {
+                    Text(L10n.translateToFooter)
+                }
             }
             .navigationTitle(L10n.tripSettings)
             .navigationBarTitleDisplayMode(.inline)
@@ -243,7 +260,7 @@ struct TripSettingsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L10n.save) {
-                        onSave(name.trimmed, currency)
+                        onSave(name.trimmed, currency, targetLanguage)
                         dismiss()
                     }
                     .disabled(name.trimmed.isEmpty)

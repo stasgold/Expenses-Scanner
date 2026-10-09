@@ -1,4 +1,5 @@
 import SwiftUI
+import Translation
 import UIKit
 
 /// Review a scanned receipt (or edit a saved one): the photo, every line and who had it, the extras,
@@ -7,6 +8,8 @@ struct ReceiptEditorView: View {
     let isNew: Bool
     let participants: [ParticipantSnapshot]
     let homeCurrency: CurrencyCode
+    /// Remembers the language picked here for the trip's next receipts.
+    let onTargetLanguage: (String?) -> Void
     let onSave: (ReceiptExpenseDraft) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -16,19 +19,32 @@ struct ReceiptEditorView: View {
     @State private var photoExpanded = false
     /// The lines as the scanner read them; while they're untouched, changing the currency reads again.
     @State private var readItems: [ReceiptItemDraft]
+    /// The language to translate into (BCP 47); nil follows the phone.
+    @State private var targetLanguage: String?
+    @State private var translation: TranslationSession.Configuration?
+    @State private var translationState = TranslationState.idle
+    @State private var showTranslatedReceipt = false
+
+    private enum TranslationState: Equatable {
+        case idle, translating, done, sameLanguage, unavailable, failed
+    }
 
     init(
         isNew: Bool,
         participants: [ParticipantSnapshot],
         homeCurrency: CurrencyCode,
         draft: ReceiptExpenseDraft,
+        targetLanguage: String?,
+        onTargetLanguage: @escaping (String?) -> Void,
         onSave: @escaping (ReceiptExpenseDraft) -> Void
     ) {
         self.isNew = isNew
         self.participants = participants
         self.homeCurrency = homeCurrency
+        self.onTargetLanguage = onTargetLanguage
         self.onSave = onSave
         _draft = State(initialValue: draft)
+        _targetLanguage = State(initialValue: targetLanguage)
         _rateText = State(initialValue: draft.rateToHome.map(Money.rateText) ?? "")
         _readItems = State(initialValue: draft.items)
     }
@@ -43,6 +59,9 @@ struct ReceiptEditorView: View {
             Form {
                 if let photo = draft.photo, let image = UIImage(data: photo) {
                     photoSection(image)
+                }
+                if !draft.rows.isEmpty || draft.items.contains(where: { $0.name.contains(where: \.isLetter) }) {
+                    translationSection
                 }
                 detailsSection
                 itemsSection
@@ -72,6 +91,18 @@ struct ReceiptEditorView: View {
             }
             .onChange(of: draft.currency) { _, currency in
                 readAgain(in: currency)
+            }
+            .onChange(of: targetLanguage) { _, language in
+                ReceiptTranslation.clear(&draft)
+                onTargetLanguage(language)
+                Task { await startTranslation() }
+            }
+            .task { await startTranslation() }
+            .translationTask(translation) { session in
+                await translate(using: session)
+            }
+            .sheet(isPresented: $showTranslatedReceipt) {
+                TranslatedReceiptView(rows: draft.rows)
             }
         }
         // A swipe shouldn't throw away a scan.
@@ -135,7 +166,8 @@ struct ReceiptEditorView: View {
                     currency: draft.currency,
                     participants: participants,
                     isSelected: selectedItem == item.id,
-                    onLocate: item.box == nil ? nil : locate(item.id)
+                    onLocate: item.box == nil ? nil : locate(item.id),
+                    onRemove: remove(item.id)
                 )
             }
             .onDelete { draft.items.remove(atOffsets: $0) }
@@ -225,6 +257,114 @@ struct ReceiptEditorView: View {
         }
     }
 
+    // MARK: Translation
+
+    private var translationSection: some View {
+        let target = Languages.language(targetLanguage)
+        return Section {
+            NavigationLink {
+                LanguagePicker(selection: $targetLanguage)
+            } label: {
+                LabeledContent(L10n.translateTo, value: Languages.name(target))
+            }
+            if !draft.rows.isEmpty {
+                Button {
+                    showTranslatedReceipt = true
+                } label: {
+                    Label(L10n.showTranslatedReceipt, systemImage: "doc.plaintext")
+                }
+            }
+        } header: {
+            Text(L10n.translation)
+        } footer: {
+            translationFooter
+        }
+    }
+
+    @ViewBuilder
+    private var translationFooter: some View {
+        let source = draft.sourceLanguage.map { Languages.name(Languages.language($0)) }
+        switch translationState {
+        case .translating:
+            Text(L10n.translating)
+        case .done:
+            Text(source.map(L10n.translatedFrom) ?? L10n.translationDone)
+        case .sameLanguage:
+            Text(L10n.sameLanguage(Languages.name(Languages.language(targetLanguage))))
+        case .unavailable:
+            Text(L10n.translationUnavailable(source ?? "?", Languages.name(Languages.language(targetLanguage))))
+                .foregroundStyle(.orange)
+        case .failed:
+            Text(L10n.translationFailed)
+                .foregroundStyle(.orange)
+        case .idle:
+            Text(L10n.translationFooter)
+        }
+    }
+
+    /// Works out the receipt's language and, unless it is already the reader's, starts translating.
+    private func startTranslation() async {
+        let target = Languages.language(targetLanguage)
+        let detected = draft.sourceLanguage.map { Languages.language($0) }
+            ?? ReceiptTranslation.detectLanguage(draft.rows.map(\.text) + draft.items.map(\.name))
+        if let detected, draft.sourceLanguage == nil {
+            draft.sourceLanguage = detected.minimalIdentifier
+        }
+        if let detected, Languages.same(detected, target) {
+            translationState = .sameLanguage
+            return
+        }
+        guard !ReceiptTranslation.jobs(for: draft, target: target).isEmpty else {
+            translationState = draft.items.contains { $0.translatedName != nil } ? .done : .idle
+            return
+        }
+        if let detected, await LanguageAvailability().status(from: detected, to: target) == .unsupported {
+            translationState = .unavailable
+            return
+        }
+        translationState = .translating
+        if let current = translation, current.source == detected, current.target == target {
+            translation?.invalidate()
+        } else {
+            translation = TranslationSession.Configuration(source: detected, target: target)
+        }
+    }
+
+    /// Runs inside `.translationTask`: iOS asks to download the languages first if they aren't on the phone.
+    private func translate(using session: TranslationSession) async {
+        let target = Languages.language(targetLanguage)
+        let jobs = ReceiptTranslation.jobs(for: draft, target: target)
+        guard !jobs.isEmpty else {
+            translationState = .done
+            return
+        }
+        do {
+            let requests = jobs.map { TranslationSession.Request(sourceText: $0.text, clientIdentifier: $0.id) }
+            let responses = try await session.translations(from: requests)
+            var answers: [String: String] = [:]
+            for response in responses {
+                if let id = response.clientIdentifier { answers[id] = response.targetText }
+            }
+            ReceiptTranslation.apply(answers, to: &draft, language: target)
+            if draft.sourceLanguage == nil, let source = responses.first?.sourceLanguage {
+                draft.sourceLanguage = source.minimalIdentifier
+            }
+            translationState = .done
+        } catch {
+            translationState = .failed
+        }
+    }
+
+    /// Removes a line that isn't a real item (a ticket count, a date, a header the reader took for a price).
+    private func remove(_ id: UUID) -> () -> Void {
+        {
+            withAnimation {
+                draft.items.removeAll { $0.id == id }
+                if selectedItem == id { selectedItem = nil }
+            }
+        }
+    }
+
     /// Highlights a line on the photo; tapping it again clears the highlight.
     private func locate(_ id: UUID) -> () -> Void {
         {
@@ -259,6 +399,7 @@ struct ReceiptEditorView: View {
         draft.printedTotal = fresh.printedTotal
         readItems = draft.items
         selectedItem = nil
+        Task { await startTranslation() }
     }
 }
 
@@ -269,6 +410,7 @@ private struct ReceiptItemRow: View {
     let participants: [ParticipantSnapshot]
     let isSelected: Bool
     let onLocate: (() -> Void)?
+    let onRemove: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -289,15 +431,34 @@ private struct ReceiptItemRow: View {
                 AmountField(title: L10n.amount, value: $item.amount, currency: currency)
                     .frame(maxWidth: 110)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(participants) { participant in
-                        chip(participant)
+            if let translated = item.translatedName, !translated.isEmpty, translated != item.name {
+                Label(translated, systemImage: "character.bubble")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(L10n.translationOf(translated))
+            }
+            HStack(spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(participants) { participant in
+                            chip(participant)
+                        }
                     }
                 }
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(L10n.removeItem)
             }
         }
         .padding(.vertical, 4)
+        // An edited name no longer matches its translation.
+        .onChange(of: item.name) { _, _ in
+            item.translatedName = nil
+            item.translatedLanguage = nil
+        }
     }
 
     private func chip(_ participant: ParticipantSnapshot) -> some View {

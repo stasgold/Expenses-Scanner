@@ -166,7 +166,6 @@ struct TripStore {
         context.insert(expense)
         trip.expenses.append(expense)
         expense.photo = draft.photo
-        expense.ocrLines = draft.rows.isEmpty ? nil : try? JSONEncoder().encode(draft.rows)
         apply(draft, to: expense, in: trip, previous: RateKey(expense))
         touch(trip)
         save()
@@ -194,7 +193,10 @@ struct TripStore {
             for share in item.shares where !share.isDeleted {
                 weights[share.participantID, default: 0] += share.weight
             }
-            return ReceiptItemDraft(name: item.name, amount: item.amount, quantity: item.quantity, box: item.box, weights: weights)
+            return ReceiptItemDraft(
+                name: item.name, amount: item.amount, quantity: item.quantity, box: item.box, weights: weights,
+                translatedName: item.translatedName, translatedLanguage: item.translatedLanguage
+            )
         }
         draft.tax = expense.tax
         draft.taxIncluded = expense.taxIncluded
@@ -206,7 +208,15 @@ struct TripStore {
         draft.rateToHome = expense.rateSource == .manual ? expense.rate : nil
         draft.photo = expense.photo
         draft.rows = expense.ocrLines.flatMap { try? JSONDecoder().decode([ReceiptRow].self, from: $0) } ?? []
+        draft.sourceLanguage = expense.sourceLanguage
         return draft
+    }
+
+    /// The language receipts on this trip are translated into; nil follows the phone.
+    func setTargetLanguage(_ trip: Trip, _ identifier: String?) {
+        guard trip.targetLanguage != identifier else { return }
+        trip.targetLanguage = identifier
+        save()
     }
 
     // MARK: Exchange rates
@@ -279,6 +289,8 @@ struct TripStore {
         expense.discount = draft.discount
         expense.extrasMode = draft.extrasMode
         expense.printedTotal = draft.printedTotal
+        expense.sourceLanguage = draft.sourceLanguage
+        expense.ocrLines = draft.rows.isEmpty ? nil : try? JSONEncoder().encode(draft.rows)
 
         for item in expense.items { context.delete(item) }
         expense.items = []
@@ -287,6 +299,8 @@ struct TripStore {
             let item = ExpenseItem(name: line.name.trimmed, amount: line.amount, position: position)
             item.quantity = max(line.quantity, 1)
             item.box = line.box
+            item.translatedName = line.translatedName
+            item.translatedLanguage = line.translatedLanguage
             context.insert(item)
             expense.items.append(item)
             for participant in people {

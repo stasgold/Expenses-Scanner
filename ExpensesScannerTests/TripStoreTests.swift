@@ -234,6 +234,33 @@ struct ReceiptAndRateStoreTests {
         #expect(ledger.balances[1].owed == Split.shares(of: draft.input, participants: [ann, ben]).owed[ben])
     }
 
+    @Test func translationsAreKeptWithTheReceipt() throws {
+        let trip = store.createTrip(name: "Kyoto", homeCurrency: "EUR", people: ["Ann"])
+        let ann = trip.orderedParticipants[0].uuid
+        var draft = ReceiptExpenseDraft(currency: "JPY")
+        draft.payerID = ann
+        draft.sourceLanguage = "ja"
+        draft.items = [ReceiptItemDraft(name: "自由席券", amount: 4960, weights: [ann: 1], translatedName: "Unreserved seat ticket", translatedLanguage: "en")]
+        draft.rows = receiptRows("自由席券  ¥4,960")
+        draft.rows[0].translation = "Unreserved seat ticket"
+        draft.rows[0].translationLanguage = "en"
+
+        let expense = store.addReceipt(to: trip, draft)
+        #expect(expense.orderedItems.first?.translatedName == "Unreserved seat ticket")
+        #expect(expense.sourceLanguage == "ja")
+
+        let reopened = store.receiptDraft(for: expense)
+        #expect(reopened.items.first?.translatedName == "Unreserved seat ticket")
+        #expect(reopened.items.first?.translatedLanguage == "en")
+        #expect(reopened.rows.first?.translation == "Unreserved seat ticket")
+        #expect(reopened.sourceLanguage == "ja")
+
+        store.setTargetLanguage(trip, "ru")
+        #expect(trip.targetLanguage == "ru")
+        store.setTargetLanguage(trip, nil)
+        #expect(trip.targetLanguage == nil)
+    }
+
     @Test func editingAReceiptReplacesItsLines() throws {
         let trip = store.createTrip(name: "Lisbon", homeCurrency: "EUR", people: ["Ann"])
         let ann = trip.orderedParticipants[0].uuid

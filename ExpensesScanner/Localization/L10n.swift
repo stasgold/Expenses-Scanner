@@ -148,7 +148,7 @@ enum L10n {
     static var addItem: String { tr("add_item", "Add item") }
     static var noItemsRead: String { tr("no_items_read", "No items could be read. Add them below.") }
     static var itemsFooter: String {
-        tr("items_footer", "Tap names to say who had each item; shared items are split equally. Swipe a line to delete it.")
+        tr("items_footer", "Tap names to say who had each item; shared items are split equally. Tap the bin to remove a line that isn’t an item.")
     }
     static var whoHadWhat: String { tr("who_had_what", "Who had what") }
     static var everyoneOnAll: String { tr("everyone_on_all", "Everyone shares every item") }
@@ -170,6 +170,30 @@ enum L10n {
         tr("mismatch_warning", "%@ difference from the receipt’s total: check for a missed or misread line.", amount)
     }
     static var notAssigned: String { tr("not_assigned", "Not assigned yet") }
+    static var removeItem: String { tr("remove_item", "Remove line") }
+
+    // MARK: Translation
+
+    static var translation: String { tr("translation", "Translation") }
+    static var translateTo: String { tr("translate_to", "Translate into") }
+    static var translateToFooter: String {
+        tr("translate_to_footer", "Receipts on this trip are translated into this language, on your iPhone.")
+    }
+    static func phoneLanguage(_ name: String) -> String { tr("phone_language", "Phone language (%@)", name) }
+    static var showTranslatedReceipt: String { tr("show_translated_receipt", "Show whole receipt translated") }
+    static var translatedReceipt: String { tr("translated_receipt", "Translated receipt") }
+    static var translating: String { tr("translating", "Translating…") }
+    static func translatedFrom(_ language: String) -> String { tr("translated_from", "Translated from %@ on your iPhone.", language) }
+    static var translationDone: String { tr("translation_done", "Translated on your iPhone.") }
+    static func sameLanguage(_ language: String) -> String { tr("same_language", "This receipt is already in %@.", language) }
+    static func translationUnavailable(_ from: String, _ to: String) -> String {
+        tr("translation_unavailable", "Your iPhone can’t translate %1$@ into %2$@. Pick another language above.", from, to)
+    }
+    static var translationFailed: String {
+        tr("translation_failed", "Couldn’t translate: the languages may need to be downloaded. Check Settings › Apps › Translate, then open the receipt again.")
+    }
+    static var translationFooter: String { tr("translation_footer", "Item names are translated on your iPhone; amounts are never changed.") }
+    static func translationOf(_ text: String) -> String { tr("translation_of", "Translation: %@", text) }
 
     // MARK: Balances
 

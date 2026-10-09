@@ -124,9 +124,11 @@ struct TripView: View {
             TripSettingsSheet(
                 name: trip.name,
                 homeCurrency: trip.homeCurrency,
+                targetLanguage: trip.targetLanguage,
                 hasExpenses: !snapshot.expenses.isEmpty
-            ) { name, currency in
+            ) { name, currency, language in
                 store.updateTrip(trip, name: name, homeCurrency: currency)
+                store.setTargetLanguage(trip, language)
             }
         }
         .sheet(item: $receipt) { session in
@@ -134,7 +136,9 @@ struct TripView: View {
                 isNew: session.expenseID == nil,
                 participants: trip.snapshot.participants,
                 homeCurrency: trip.homeCurrency,
-                draft: session.draft
+                draft: session.draft,
+                targetLanguage: trip.targetLanguage,
+                onTargetLanguage: { store.setTargetLanguage(trip, $0) }
             ) { draft in
                 if let id = session.expenseID, let expense = trip.orderedExpenses.first(where: { $0.uuid == id }) {
                     store.updateReceipt(expense, draft)
