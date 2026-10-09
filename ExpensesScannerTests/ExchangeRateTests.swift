@@ -75,7 +75,8 @@ struct ExchangeRateTests {
     }
 
     @Test func ratesKeepTwelveDecimals() throws {
-        let rate = ExchangeRates.tidy(1 / try #require(Decimal(string: "3")))
+        let three = try #require(Decimal(string: "3"))
+        let rate = ExchangeRates.tidy(1 / three)
         #expect(Money.rateText(rate) == "0.333333333333")
     }
 
