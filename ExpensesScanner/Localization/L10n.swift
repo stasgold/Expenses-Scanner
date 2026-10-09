@@ -147,7 +147,7 @@ enum L10n {
     static var items: String { tr("items", "Items") }
     static var itemName: String { tr("item_name", "Item") }
     static var addItem: String { tr("add_item", "Add item") }
-    static var noItemsRead: String { tr("no_items_read", "No items could be read. Add them below.") }
+    static var noItemsRead: String { tr("no_items_read", "No items could be read. Add them below, or just split the total.") }
     static var itemsFooter: String {
         tr("items_footer", "Tap names to say who had each item; shared items are split equally. Tap the bin to remove a line that isn’t an item.")
     }
@@ -172,6 +172,10 @@ enum L10n {
     }
     static var notAssigned: String { tr("not_assigned", "Not assigned yet") }
     static var removeItem: String { tr("remove_item", "Remove line") }
+    static var wholeReceipt: String { tr("whole_receipt", "Whole receipt") }
+    static func useTotalAsOneLine(_ amount: String) -> String {
+        tr("use_total_as_one_line", "Split the total (%@) as one line", amount)
+    }
 
     // MARK: Translation
 

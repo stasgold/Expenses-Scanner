@@ -261,6 +261,30 @@ struct ReceiptAndRateStoreTests {
         #expect(trip.targetLanguage == nil)
     }
 
+    @Test func aReceiptWithOnlyItsTotalReadSplitsTheTotal() throws {
+        let trip = store.createTrip(name: "Tokyo", homeCurrency: "JPY", people: ["Ann", "Ben"])
+        let people = trip.orderedParticipants.map(\.uuid)
+        var parsed = ParsedReceipt()
+        parsed.total = 17_500
+        parsed.tax = 1590
+        parsed.taxIncluded = false
+        parsed.tip = 500
+        var draft = ReceiptExpenseDraft(parsed: parsed, rows: [], currency: "JPY", date: Date(), payer: people[0], participants: people, photo: nil)
+        #expect(draft.items.map(\.amount) == [17_500])
+        #expect(draft.items.first?.weights == [people[0]: 1, people[1]: 1])
+        #expect(draft.input.total == 17_500)
+        #expect(draft.mismatch == 0)
+        #expect(draft.isValid)
+
+        // Lines removed by hand: still saveable, as the total.
+        draft.items = []
+        #expect(draft.isValid)
+        draft.useTotalAsOneLine(sharedBy: [people[1]: 1])
+        let expense = store.addReceipt(to: trip, draft)
+        #expect(expense.total == 17_500)
+        #expect(Ledger(trip.snapshot).balances.map(\.net) == [17_500, -17_500])
+    }
+
     @Test func editingAReceiptReplacesItsLines() throws {
         let trip = store.createTrip(name: "Lisbon", homeCurrency: "EUR", people: ["Ann"])
         let ann = trip.orderedParticipants[0].uuid

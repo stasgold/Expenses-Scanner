@@ -94,6 +94,7 @@ struct ReceiptEditorView: View {
                     Button(L10n.save) {
                         guard canSave else { return }
                         var result = draft
+                        if result.items.isEmpty { result.useTotalAsOneLine(sharedBy: everyone) }
                         result.title = draft.title.trimmed
                         result.rateToHome = isForeign ? Money.parseRate(rateText) : nil
                         onSave(result)
@@ -172,6 +173,13 @@ struct ReceiptEditorView: View {
             if draft.items.isEmpty {
                 Text(L10n.noItemsRead)
                     .foregroundStyle(.secondary)
+                if let total = draft.printedTotal, total > 0 {
+                    Button {
+                        draft.useTotalAsOneLine(sharedBy: everyone)
+                    } label: {
+                        Label(L10n.useTotalAsOneLine(Money.format(total, draft.currency)), systemImage: "equal.circle")
+                    }
+                }
             }
             ForEach($draft.items) { $item in
                 ReceiptItemRow(

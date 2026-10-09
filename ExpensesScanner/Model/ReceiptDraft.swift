@@ -65,6 +65,23 @@ struct ReceiptExpenseDraft: Equatable {
         printedTotal = parsed.total
         self.photo = photo
         self.rows = rows
+        // Only the total could be read: start from it as one line everyone shares.
+        if items.isEmpty, let total = parsed.total, total > 0 {
+            useTotalAsOneLine(sharedBy: everyone)
+        }
+    }
+
+    /**
+     * Replaces the lines with one line for the printed total. Tax, tip, service and discounts are
+     * already inside that total, so they're cleared rather than added again (tax stays, as included).
+     */
+    mutating func useTotalAsOneLine(sharedBy weights: [UUID: Int]) {
+        guard let total = printedTotal, total > 0 else { return }
+        items = [ReceiptItemDraft(name: L10n.wholeReceipt, amount: total, weights: weights)]
+        taxIncluded = true
+        tip = 0
+        service = 0
+        discount = 0
     }
 
     var input: ExpenseInput {
@@ -92,7 +109,8 @@ struct ReceiptExpenseDraft: Equatable {
         printedTotal.map { $0 - input.total }
     }
 
+    /// Saveable with at least one line, or with just the printed total (saved as one line).
     var isValid: Bool {
-        payerID != nil && !items.isEmpty
+        payerID != nil && (!items.isEmpty || (printedTotal ?? 0) > 0)
     }
 }
