@@ -168,18 +168,71 @@ struct ReceiptParserTests {
         #expect(receipt.items.map(\.name) == ["取引内容：お買上", "取引内容：お買上"])
     }
 
-    /// The cost of skipping bare small numbers: a ¥98 item printed without a sign is missed, and the
-    /// total check shows exactly that gap so it can be added by hand.
-    @Test func wholeUnitPricesWithoutASignNeedThreeDigits() {
+    /// A bare one- or two-digit number may be a count or a seat as easily as a price, so it is left out,
+    /// unless the total is short by exactly that much.
+    @Test func shortBareNumbersArePricesOnlyWhenTheTotalSaysSo() {
         let receipt = parse("""
         おにぎり  150
         ガム  98
         袋  3
         合計  248
         """, currency: "JPY")
-        #expect(items(receipt) == ["おにぎり=150"])
+        #expect(items(receipt) == ["おにぎり=150", "ガム=98"])
         #expect(receipt.total == 248)
-        #expect(receipt.mismatch == 98)
+        #expect(receipt.mismatch == 0)
+
+        let seat = parse("""
+        おにぎり  150
+        テーブル  9
+        合計  300
+        """, currency: "JPY")
+        #expect(items(seat) == ["おにぎり=150"])
+        #expect(seat.mismatch == 150)
+    }
+
+    /// A 7-Eleven receipt: "小 計" and "合 計" spaced out, one subtotal and tax per rate added on top,
+    /// "¥" only on the summary lines, "@278x 2" quantities and a ¥4 bag. Read from a real receipt photo.
+    @Test func japaneseConvenienceStoreWithTaxPerRate() {
+        let receipt = parse("""
+        セブン-イレブン
+        京都東洞院七条店
+        電話：075-000-0000  レジ#1
+        2026年10月10日(土) 17:10  責625
+        領 収 書
+        こだわりたまごサンド
+        @278x 2  *556
+        プレミアムフレッシュバナナ  *228
+        手巻ツナマヨネーズ  *182
+        手巻炭火焼銀しゃけ  *198
+        アサヒ ゴールド 350ml
+        @207x 2  414
+        バイオ50レジ袋大1枚  4
+        小 計（税抜 8%）  ¥1,164
+        消費税等（ 8%）  ¥93
+        小 計（税抜10%）  ¥418
+        消費税等（10%）  ¥41
+        合 計  ¥1,716
+        (税率 8%対象  ¥1,257)
+        (税率10%対象  ¥459)
+        (内消費税等 8%  ¥93)
+        (内消費税等10%  ¥41)
+        Suica支払  ¥1,716
+        お買上明細は上記のとおりです。
+        [*]マークは軽減税率対象です。
+        Suica番号  JE***********0000
+        Suica残高  ¥2,079
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.merchant == "セブン-イレブン")
+        #expect(items(receipt) == [
+            "こだわりたまごサンド=556×2", "プレミアムフレッシュバナナ=228", "手巻ツナマヨネーズ=182", "手巻炭火焼銀しゃけ=198",
+            "アサヒ ゴールド 350ml=414×2", "バイオ50レジ袋大1枚=4",
+        ])
+        #expect(receipt.subtotal == 1582)
+        #expect(receipt.tax == 134)
+        #expect(receipt.taxIncluded == false)
+        #expect(receipt.total == 1716)
+        #expect(receipt.mismatch == 0)
     }
 
     /// A hotel folio: the amount due is printed first, the items in a dated table below it with the card

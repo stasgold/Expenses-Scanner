@@ -95,6 +95,7 @@ struct ReceiptEditorView: View {
                         guard canSave else { return }
                         var result = draft
                         if result.items.isEmpty { result.useTotalAsOneLine(sharedBy: everyone) }
+                        result.settleToPrintedTotal()
                         result.title = draft.title.trimmed
                         result.rateToHome = isForeign ? Money.parseRate(rateText) : nil
                         onSave(result)

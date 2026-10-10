@@ -285,6 +285,42 @@ struct ReceiptAndRateStoreTests {
         #expect(Ledger(trip.snapshot).balances.map(\.net) == [17_500, -17_500])
     }
 
+    @Test func aReceiptWithUnreadLinesIsSavedAtItsPrintedTotal() throws {
+        let trip = store.createTrip(name: "Kyoto", homeCurrency: "JPY", people: ["Ann", "Ben", "Cat"])
+        let people = trip.orderedParticipants.map(\.uuid)
+        var draft = ReceiptExpenseDraft(currency: "JPY")
+        draft.payerID = people[0]
+        draft.items = [
+            ReceiptItemDraft(name: "Sandwich", amount: 556, weights: [people[0]: 1]),
+            ReceiptItemDraft(name: "Beer", amount: 414, weights: [people[1]: 1]),
+        ]
+        draft.tax = 80
+        draft.taxIncluded = false
+        draft.printedTotal = 1100
+        #expect(draft.mismatch == 50)
+
+        // The difference becomes a line for everyone who had something; Cat had nothing.
+        draft.settleToPrintedTotal()
+        #expect(draft.items.last?.name == L10n.totalDifference)
+        #expect(draft.items.last?.amount == 50)
+        #expect(draft.items.last?.weights == [people[0]: 1, people[1]: 1])
+        #expect(draft.input.total == 1100)
+        #expect(draft.mismatch == 0)
+
+        // Edited and saved again: the same line is adjusted, not a second one added.
+        draft.items[1].amount = 434
+        draft.settleToPrintedTotal()
+        #expect(draft.items.map(\.amount) == [556, 434, 30])
+        draft.items[1].amount = 464
+        draft.settleToPrintedTotal()
+        #expect(draft.items.map(\.amount) == [556, 464])
+
+        draft.items[1].amount = 414
+        draft.settleToPrintedTotal()
+        let expense = store.addReceipt(to: trip, draft)
+        #expect(expense.total == 1100)
+    }
+
     @Test func editingAReceiptReplacesItsLines() throws {
         let trip = store.createTrip(name: "Lisbon", homeCurrency: "EUR", people: ["Ann"])
         let ann = trip.orderedParticipants[0].uuid

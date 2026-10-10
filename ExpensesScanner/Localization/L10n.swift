@@ -168,8 +168,9 @@ enum L10n {
     static var printedTotal: String { tr("printed_total", "Total on receipt") }
     static var addsUpTo: String { tr("adds_up_to", "Lines add up to") }
     static func mismatchWarning(_ amount: String) -> String {
-        tr("mismatch_warning", "%@ difference from the receipt’s total: check for a missed or misread line.", amount)
+        tr("mismatch_warning", "%@ difference from the receipt’s total: check for a missed or misread line. Saving keeps the receipt’s total and adds the difference as a line everyone shares.", amount)
     }
+    static var totalDifference: String { tr("total_difference", "Not read from the receipt") }
     static var notAssigned: String { tr("not_assigned", "Not assigned yet") }
     static var removeItem: String { tr("remove_item", "Remove line") }
     static var wholeReceipt: String { tr("whole_receipt", "Whole receipt") }

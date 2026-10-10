@@ -140,15 +140,22 @@ enum ReceiptParser {
         let detected = shouldDetect ? detectCurrency(rows) : nil
         let currency = detected ?? hint
         let tokensByRow = rows.map { moneyTokens(in: $0.text) }
-        let style = NumberStyle.detect(tokensByRow.flatMap { $0 }, currencyDigits: Money.minorDigits(currency))
+        let labels = rows.map { label(of: $0.text) }
+        let categories = labels.map(classify)
+        var style = NumberStyle.detect(tokensByRow.flatMap { $0 }, currencyDigits: Money.minorDigits(currency))
+        // Whether prices carry a sign is decided by the item lines alone: Japanese shops print "¥" on
+        // the subtotals and totals but not on the items.
+        if style.decimals == 0 {
+            style.marksRequired = NumberStyle.marksRequired(zip(tokensByRow, categories).filter { $0.1 == nil }.flatMap { $0.0 })
+        }
         let scale = Money.scale(currency)
 
         // Pass 1: what each line is.
         var lines: [Line] = []
         for (index, row) in rows.enumerated() {
             let price = tokensByRow[index].last.flatMap { style.value($0, scale: scale) }
-            let label = normalized(row.text)
-            var category = classify(label)
+            let label = labels[index]
+            var category = categories[index]
             let name = cleanName(row.text)
             // "TOTAL" on one line and the amount on the next.
             if category == nil, price != nil, letterCount(name) < 2,
@@ -157,7 +164,8 @@ enum ReceiptParser {
             }
             lines.append(Line(
                 index: index, text: row.text, price: price, category: category, name: name, box: row.box,
-                saysIncluded: category == .tax && containsAny(label, includedMarkers)
+                saysIncluded: category == .tax && containsAny(label, includedMarkers),
+                smallPrice: price == nil ? smallPrice(row.text, style: style, scale: scale) : nil
             ))
         }
 
@@ -195,15 +203,53 @@ enum ReceiptParser {
             return a.reading.tail > b.reading.tail
         }) else { return ParsedReceipt() }
 
-        var result = best.receipt
-        result.currency = detected
-        result.date = detectDate(rows, now: now)
-        result.merchant = merchant(lines, before: best.receipt.firstItemLine ?? lines.count, skipping: best.receipt.usedNameLines)
-        // After the total only tax breakdowns are read ("davon MwSt 19% 0,97").
-        let taxAfterTotal = lines.filter { $0.index > best.reading.tail && $0.category == .tax }.compactMap(\.price).map(abs).reduce(0, +)
-        let includedHint = lines.contains(where: \.saysIncluded)
-        resolveTax(&result, taxAfterTotal: taxAfterTotal, includedHint: includedHint)
-        return result
+        let reading = best.reading
+        func finish(_ lines: [Line]) -> ParsedReceipt {
+            var result = collect(lines, in: reading.range)
+            result.total = reading.total
+            result.currency = detected
+            result.date = detectDate(rows, now: now)
+            result.merchant = merchant(lines, before: result.firstItemLine ?? lines.count, skipping: result.usedNameLines)
+            // After the total only tax breakdowns are read ("davon MwSt 19% 0,97").
+            let taxAfterTotal = lines.filter { $0.index > reading.tail && $0.category == .tax }.compactMap(\.price).map(abs).reduce(0, +)
+            let includedHint = lines.contains(where: \.saysIncluded)
+            resolveTax(&result, taxAfterTotal: taxAfterTotal, includedHint: includedHint)
+            return result
+        }
+        let result = finish(lines)
+
+        // Lines short of the total by exactly what a short bare number says ("袋 4", left out as maybe a
+        // count) are items after all.
+        guard let gap = result.mismatch, gap > 0, let first = result.firstItemLine else { return result }
+        let candidates = lines.filter {
+            reading.range.contains($0.index) && $0.index > first && $0.price == nil && $0.category == nil
+                && $0.smallPrice != nil && letterCount($0.name) >= 2
+        }
+        let matching = candidates.filter { $0.smallPrice == gap }
+        let recovered = matching.count == 1 ? matching
+            : candidates.compactMap(\.smallPrice).reduce(0, +) == gap ? candidates : []
+        guard !recovered.isEmpty else { return result }
+        var amended = lines
+        for line in recovered { amended[line.index].price = line.smallPrice }
+        return finish(amended)
+    }
+
+    /// The text with the spaces between CJK characters taken out, for matching keywords: receipts
+    /// print "小 計" and "合 計" spaced out.
+    static func label(of text: String) -> String {
+        normalized(text).replacingOccurrences(of: #"(?<=[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}])\s+(?=[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}])"#, with: "", options: .regularExpression)
+    }
+
+    /// A one- or two-digit whole-unit amount ending the line ("袋 4"): not a price on its own, since
+    /// counts and seat numbers look the same, but one if the total says so.
+    private static func smallPrice(_ text: String, style: NumberStyle, scale: Int64) -> Int64? {
+        guard style.decimals == 0,
+              let last = text.split(whereSeparator: \.isWhitespace).last,
+              let token = moneyToken(String(last)), !token.negative, !token.marked,
+              token.core.count <= 2, token.core.allSatisfy(\.isNumber),
+              let value = Int64(token.core), value > 0
+        else { return nil }
+        return value * scale
     }
 
     /// One receipt line as pass 1 understood it.
@@ -216,6 +262,8 @@ enum ReceiptParser {
         var box: OCRBox?
         /// A tax line saying the tax is already inside the prices ("incl.", "内").
         var saysIncluded: Bool
+        /// A short bare number ending the line, kept in case the total shows it was a price.
+        var smallPrice: Int64?
     }
 
     /// A way to read the receipt: these lines are its items, and this is their total.
@@ -231,12 +279,20 @@ enum ReceiptParser {
     /// Items and extras from the lines in `range`. Totals and payment lines inside it are skipped.
     private static func collect(_ lines: [Line], in range: Range<Int>) -> ParsedReceipt {
         var result = ParsedReceipt()
+        // Japanese receipts print one subtotal per tax rate ("小計(税抜 8%)", "小計(税抜10%)"): those add up.
+        var plainSubtotal: Int64?
+        var rateSubtotals: Int64?
         for line in lines[range] {
             guard let price = line.price else { continue }
             let above = line.index > range.lowerBound && lines[line.index - 1].price == nil ? lines[line.index - 1] : nil
             switch line.category {
             case .subtotal?:
-                result.subtotal = abs(price)
+                if line.text.contains("%") || line.text.contains("％") {
+                    rateSubtotals = (rateSubtotals ?? 0) + abs(price)
+                } else {
+                    plainSubtotal = abs(price)
+                }
+                result.subtotal = plainSubtotal ?? rateSubtotals
             case .total?, .payment?:
                 continue
             case .tax?:
@@ -286,7 +342,7 @@ enum ReceiptParser {
     private static func merchant(_ lines: [Line], before end: Int, skipping used: Set<Int>) -> String? {
         for line in lines.prefix(end) where line.price == nil && line.category == nil && !used.contains(line.index) {
             let name = line.name
-            let key = normalized(name).trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            let key = label(of: name).trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
             guard letterCount(name) >= 3, !notMerchants.contains(key) else { continue }
             // The raw text too: "MR./MS." is dropped from the name for its slash.
             let guest = #"^(mr|ms|mrs|miss|guest|name)\b"#
@@ -367,6 +423,7 @@ enum ReceiptParser {
             "お釣り", "お預り", "お預かり", "現金", "クレジット", "现金", "找零", "거스름돈", "현금", "카드",
             "เงินสด", "เงินทอน", "tiền mặt", "tiền thừa", "nakit", "para üstü", "gotówka", "reszta",
             "tendered", "paid", "payment", "auth", "approval", "contactless", "debit", "credit",
+            "支払", "残高", "電子マネー",
         ],
     ]
 
@@ -489,9 +546,7 @@ enum ReceiptParser {
         var marksRequired = false
 
         static func detect(_ tokens: [MoneyToken], currencyDigits: Int) -> NumberStyle {
-            let marked = tokens.filter(\.marked).count
-            let bare = tokens.filter { !$0.marked && $0.core.filter(\.isNumber).count >= 3 }.count
-            let marksRequired = marked >= 2 && marked >= bare
+            let marksRequired = marksRequired(tokens)
             guard currencyDigits > 0 else { return NumberStyle(decimalSeparator: ".", decimals: 0, marksRequired: marksRequired) }
             var dots = 0
             var commas = 0
@@ -505,6 +560,13 @@ enum ReceiptParser {
                 return NumberStyle(decimalSeparator: ".", decimals: 0, marksRequired: marksRequired)
             }
             return NumberStyle(decimalSeparator: commas > dots ? "," : ".", decimals: currencyDigits)
+        }
+
+        /// Prices are written with a sign when most of them are: then a bare "312" is a room number.
+        static func marksRequired(_ tokens: [MoneyToken]) -> Bool {
+            let marked = tokens.filter(\.marked).count
+            let bare = tokens.filter { !$0.marked && $0.core.filter(\.isNumber).count >= 3 }.count
+            return marked >= 2 && marked >= bare
         }
 
         /// The token in minor units, or nil when it isn't an amount in this style ("12" when prices
@@ -580,9 +642,9 @@ enum ReceiptParser {
         return joined.trimmingCharacters(in: CharacterSet(charactersIn: " .:*-–—_#=•·").union(.whitespaces))
     }
 
-    /// "2 x Beer", "Beer 2 x 3.50", "2x", "2 Beer" → 2; otherwise 1.
+    /// "2 x Beer", "Beer 2 x 3.50", "@278x 2", "2x", "2 Beer" → 2; otherwise 1.
     static func quantity(in text: String) -> Int {
-        for pattern in [#"^\s*(\d{1,3})\s*[x×*]\s"#, #"(\d{1,3})\s*[x×@]\s*\d"#, #"^\s*(\d{1,2})\s+\p{L}"#] {
+        for pattern in [#"@\s*\d[\d,.]*\s*[x×]\s*(\d{1,3})(?!\d)"#, #"^\s*(\d{1,3})\s*[x×*]\s"#, #"(\d{1,3})\s*[x×@]\s*\d"#, #"^\s*(\d{1,2})\s+\p{L}"#] {
             if let value = firstCapture(pattern, in: text).flatMap(Int.init), (1...999).contains(value) {
                 return value
             }

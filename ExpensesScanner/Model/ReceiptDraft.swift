@@ -84,6 +84,25 @@ struct ReceiptExpenseDraft: Equatable {
         discount = 0
     }
 
+    /**
+     * Makes the receipt add up to its printed total, which is what was actually paid: lines the camera
+     * missed or misread become one more line for the difference, shared by everyone on the receipt.
+     * Saving again adjusts that line instead of adding another.
+     */
+    mutating func settleToPrintedTotal() {
+        guard let total = printedTotal, total > 0, let gap = mismatch, gap != 0 else { return }
+        if let index = items.firstIndex(where: { $0.name == L10n.totalDifference }) {
+            items[index].amount += gap
+            if items[index].amount == 0 { items.remove(at: index) }
+            return
+        }
+        var everyone: [UUID: Int] = [:]
+        for item in items {
+            for (id, weight) in item.weights where weight > 0 { everyone[id] = 1 }
+        }
+        items.append(ReceiptItemDraft(name: L10n.totalDifference, amount: gap, weights: everyone))
+    }
+
     var input: ExpenseInput {
         ExpenseInput(
             lines: items.map { item in
