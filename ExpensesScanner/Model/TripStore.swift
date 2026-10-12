@@ -207,7 +207,7 @@ struct TripStore {
         draft.printedTotal = expense.printedTotal
         draft.rateToHome = expense.rateSource == .manual ? expense.rate : nil
         draft.photo = expense.photo
-        draft.rows = expense.ocrLines.flatMap { try? JSONDecoder().decode([ReceiptRow].self, from: $0) } ?? []
+        draft.rows = expense.receiptRows
         draft.sourceLanguage = expense.sourceLanguage
         return draft
     }
@@ -397,10 +397,20 @@ extension Trip {
                     payer: expense.payerID,
                     rateToHome: expense.rate,
                     input: expense.input,
-                    rateIsApproximate: expense.rateSource == .cachedFallback
+                    rateIsApproximate: expense.rateSource == .cachedFallback,
+                    translatedTitle: expense.kind == .receipt
+                        ? ReceiptTranslation.translatedTitle(expense.title, rows: expense.receiptRows, language: Languages.language(targetLanguage))
+                        : nil
                 )
             }
         )
+    }
+}
+
+extension Expense {
+    /// The receipt's lines as read, with their translations.
+    var receiptRows: [ReceiptRow] {
+        ocrLines.flatMap { try? JSONDecoder().decode([ReceiptRow].self, from: $0) } ?? []
     }
 }
 

@@ -39,6 +39,8 @@ struct ExpenseSnapshot: Equatable, Identifiable {
     var input: ExpenseInput
     /// The rate is an older saved one standing in while offline.
     var rateIsApproximate = false
+    /// A receipt's title (the shop's name) in the trip's reading language.
+    var translatedTitle: String? = nil
 
     /// For a transfer: who received the money.
     var recipient: UUID? {

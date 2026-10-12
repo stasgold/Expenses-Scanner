@@ -415,6 +415,13 @@ struct ExpenseRow: View {
                 Text(trip.title(of: expense))
                     .font(.headline)
                     .lineLimit(1)
+                if let translated = expense.translatedTitle {
+                    Text(translated)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .accessibilityLabel(L10n.translationOf(translated))
+                }
                 Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

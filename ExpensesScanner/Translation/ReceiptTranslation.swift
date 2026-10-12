@@ -82,6 +82,20 @@ enum ReceiptTranslation {
         }
     }
 
+    /**
+     * The receipt's title in `target`: the translation of the line it was read from (the shop's name).
+     * A title typed by hand matches no line and stays as it is.
+     */
+    static func translatedTitle(_ title: String, rows: [ReceiptRow], language target: Locale.Language) -> String? {
+        let title = title.trimmed
+        guard !title.isEmpty else { return nil }
+        let language = target.minimalIdentifier
+        guard let row = rows.first(where: { $0.translationLanguage == language && ReceiptParser.cleanName($0.text) == title }),
+              let translation = row.translation?.trimmed, !translation.isEmpty, translation != title
+        else { return nil }
+        return translation
+    }
+
     /// Drops every translation, e.g. when the target language changes.
     static func clear(_ draft: inout ReceiptExpenseDraft) {
         for index in draft.items.indices {

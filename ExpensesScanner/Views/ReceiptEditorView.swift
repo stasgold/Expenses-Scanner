@@ -154,7 +154,15 @@ struct ReceiptEditorView: View {
 
     private var detailsSection: some View {
         Section {
-            TextField(L10n.receiptTitle, text: $draft.title, prompt: Text(L10n.receiptTitleHint))
+            VStack(alignment: .leading, spacing: 4) {
+                TextField(L10n.receiptTitle, text: $draft.title, prompt: Text(L10n.receiptTitleHint))
+                if let translated = ReceiptTranslation.translatedTitle(draft.title, rows: draft.rows, language: Languages.language(targetLanguage)) {
+                    Label(translated, systemImage: "character.bubble")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(L10n.translationOf(translated))
+                }
+            }
             DatePicker(L10n.date, selection: $draft.date, displayedComponents: .date)
             NavigationLink {
                 CurrencyPicker(selection: $draft.currency)

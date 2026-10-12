@@ -261,6 +261,32 @@ struct ReceiptAndRateStoreTests {
         #expect(trip.targetLanguage == nil)
     }
 
+    @Test func theShopsNameIsShownInTheReadersLanguage() throws {
+        let trip = store.createTrip(name: "Kyoto", homeCurrency: "EUR", people: ["Ann"])
+        store.setTargetLanguage(trip, "en")
+        let ann = trip.orderedParticipants[0].uuid
+        var draft = ReceiptExpenseDraft(currency: "JPY")
+        draft.payerID = ann
+        draft.title = "セブン-イレブン"
+        draft.items = [ReceiptItemDraft(name: "緑茶", amount: 140, weights: [ann: 1])]
+        draft.rows = receiptRows("""
+        セブン-イレブン
+        緑茶  ¥140
+        """)
+        draft.rows[0].translation = "Seven-Eleven"
+        draft.rows[0].translationLanguage = "en"
+        let english = Locale.Language(identifier: "en")
+        #expect(ReceiptTranslation.translatedTitle(draft.title, rows: draft.rows, language: english) == "Seven-Eleven")
+        // Not in the language asked for, or a title typed by hand: nothing to show.
+        #expect(ReceiptTranslation.translatedTitle(draft.title, rows: draft.rows, language: Locale.Language(identifier: "de")) == nil)
+        #expect(ReceiptTranslation.translatedTitle("Lunch", rows: draft.rows, language: english) == nil)
+
+        let expense = store.addReceipt(to: trip, draft)
+        #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == "Seven-Eleven")
+        store.setTargetLanguage(trip, "de")
+        #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == nil)
+    }
+
     @Test func aReceiptWithOnlyItsTotalReadSplitsTheTotal() throws {
         let trip = store.createTrip(name: "Tokyo", homeCurrency: "JPY", people: ["Ann", "Ben"])
         let people = trip.orderedParticipants.map(\.uuid)
