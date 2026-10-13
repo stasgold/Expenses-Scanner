@@ -284,6 +284,31 @@ struct ReceiptParserTests {
         #expect(receipt.mismatch == 0)
     }
 
+    /// A card slip from a ticket machine: two columns per line, the amount written "¥520-" (the dash
+    /// closes it) beside slip and approval numbers, and no items. Read from a real slip photo.
+    @Test func cardSlipWithOnlyTheAmountCharged() {
+        let receipt = parse("""
+        近畿日本鉄道  クレジットご利用控
+        ※この控は大切に保管してください。払戻
+        時は購入時のクレジットカードが必要です。
+        CARD-UFJカード  99664
+        会員番号  455743******0000  IC
+        お取扱日  2026/10/13  14:54:00
+        利用金額  ¥520-  伝票番号  04320
+        承認番号  0000000  処理通番  028656
+        有効期限  XX/XX  取扱区分  一括
+        商品区分  乗車券等  取引内容  お買上
+        ARC00 ATC00D1 No00
+        A0000000031010
+        Visa Credit  近鉄奈良187
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.merchant == "近畿日本鉄道")
+        #expect(receipt.items.isEmpty)
+        #expect(receipt.total == 520)
+        #expect(receipt.discount == 0)
+    }
+
     @Test func totalAtTheTopWithItsLinesBelow() {
         let receipt = parse("""
         Invoice
@@ -331,7 +356,7 @@ struct ReceiptParserTests {
         ("12.50", "12.50", false, false), ("€8.00", "8.00", false, true), ("-2.00", "2.00", true, false),
         ("3.50-", "3.50", true, false), ("(1.20)", "1.20", true, false), ("12.50EUR", "12.50", false, true),
         ("EUR12.50", "12.50", false, true), ("¥1,200", "1,200", false, true), ("1,200円", "1,200", false, true),
-        ("12.50A", "12.50", false, false), ("Rp25.000", "25.000", false, true),
+        ("12.50A", "12.50", false, false), ("Rp25.000", "25.000", false, true), ("¥520-", "520", false, true),
     ])
     func amountTokens(token: String, core: String, negative: Bool, marked: Bool) {
         #expect(ReceiptParser.moneyToken(token) == ReceiptParser.MoneyToken(core: core, negative: negative, marked: marked))

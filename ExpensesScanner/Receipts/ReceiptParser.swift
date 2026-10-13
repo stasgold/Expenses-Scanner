@@ -153,7 +153,10 @@ enum ReceiptParser {
         // Pass 1: what each line is.
         var lines: [Line] = []
         for (index, row) in rows.enumerated() {
-            let price = tokensByRow[index].last.flatMap { style.value($0, scale: scale) }
+            // The right-most amount, or the right-most with a currency sign: on two-column slips
+            // ("利用金額 ¥520- 伝票番号 04320") the bare number after it is a slip number.
+            let tokens = tokensByRow[index]
+            let price = (tokens.last(where: \.marked) ?? tokens.last).flatMap { style.value($0, scale: scale) }
             let label = labels[index]
             var category = categories[index]
             let name = cleanName(row.text)
@@ -165,7 +168,8 @@ enum ReceiptParser {
             lines.append(Line(
                 index: index, text: row.text, price: price, category: category, name: name, box: row.box,
                 saysIncluded: category == .tax && containsAny(label, includedMarkers),
-                smallPrice: price == nil ? smallPrice(row.text, style: style, scale: scale) : nil
+                smallPrice: price == nil ? smallPrice(row.text, style: style, scale: scale) : nil,
+                firstFragment: row.fragments.count > 1 ? row.fragments.first?.text : nil
             ))
         }
 
@@ -264,6 +268,8 @@ enum ReceiptParser {
         var saysIncluded: Bool
         /// A short bare number ending the line, kept in case the total shows it was a price.
         var smallPrice: Int64?
+        /// The left-most piece when the line has several: "近畿日本鉄道" in "近畿日本鉄道  クレジットご利用控".
+        var firstFragment: String?
     }
 
     /// A way to read the receipt: these lines are its items, and this is their total.
@@ -340,8 +346,13 @@ enum ReceiptParser {
     ]
 
     private static func merchant(_ lines: [Line], before end: Int, skipping used: Set<Int>) -> String? {
-        for line in lines.prefix(end) where line.price == nil && line.category == nil && !used.contains(line.index) {
-            let name = line.name
+        for line in lines.prefix(end) where line.price == nil && !used.contains(line.index) {
+            var name = line.name
+            // A heading that also says what the slip is ("… クレジットご利用控"): its first piece may be the name.
+            if line.category != nil {
+                guard let first = line.firstFragment, classify(label(of: first)) == nil else { continue }
+                name = cleanName(first)
+            }
             let key = label(of: name).trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
             guard letterCount(name) >= 3, !notMerchants.contains(key) else { continue }
             // The raw text too: "MR./MS." is dropped from the name for its slash.
@@ -395,6 +406,7 @@ enum ReceiptParser {
             "total", "grand total", "totale", "gesamt", "gesamtbetrag", "summe", "importe", "montant", "totaal",
             "итого", "всего", "к оплате", "合計", "合计", "总计", "總計", "税込合計", "お会計", "합계", "총액",
             "รวมทั้งสิ้น", "ยอดรวม", "ยอดสุทธิ", "tổng", "toplam", "razem", "suma", "celkem", "yhteensä",
+            "利用金額", "ご利用金額", "お支払金額", "支払金額", "ご請求金額", "請求金額", "お会計金額",
             "amount due", "balance due", "to pay", "a pagar", "à payer", "zu zahlen", "da pagare", "te betalen",
         ],
         .tax: [
@@ -524,7 +536,9 @@ enum ReceiptParser {
         guard suffixLetters.isEmpty || suffixCurrency || vatClass else { return nil }
         let marked = prefixCurrency || suffixCurrency
             || prefix.contains(where: \.isCurrencySymbol) || suffix.contains(where: \.isCurrencySymbol)
-        let negative = prefix.contains("-") || prefix.contains("−") || suffix.contains("-") || suffix.contains("−")
+        // "¥520-": in Japan a dash after a yen amount just closes it.
+        let yenClosed = (prefix.contains("¥") || prefix.contains("￥")) && (suffix == "-" || suffix == "−")
+        let negative = prefix.contains("-") || prefix.contains("−") || ((suffix.contains("-") || suffix.contains("−")) && !yenClosed)
             || (prefix.contains("(") && suffix.contains(")"))
         return MoneyToken(core: core, negative: negative, marked: marked)
     }
