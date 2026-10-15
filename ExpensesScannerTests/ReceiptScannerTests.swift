@@ -45,6 +45,23 @@ struct ReceiptScannerTests {
         #expect(receipt.items.allSatisfy { $0.box != nil })
     }
 
+    /// A real photo of a contactless card slip (card and approval numbers blanked out), taken at an angle
+    /// in sunlight with the issuer's stamp over the amount.
+    @Test func readsAPhotographedCardSlip() async throws {
+        let url = try #require(Bundle(for: PhotoBundle.self).url(forResource: "cardnet-sales-slip", withExtension: "jpg"))
+        let image = try #require(UIImage(contentsOfFile: url.path))
+        let scanned = try await ReceiptScanner.scan([image])
+        let rows = LineGrouper.rows(scanned.fragments)
+        for row in rows {
+            print("OCR: \(row.fragments.map(\.text).joined(separator: " ¦ "))")
+        }
+        let receipt = ReceiptParser.parse(rows, currency: "EUR")
+        print("OCR: parsed total=\(String(describing: receipt.total)) items=\(receipt.items.map(\.amount)) merchant=\(receipt.merchant ?? "-")")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.total == 3860)
+        #expect(receipt.items.isEmpty)
+    }
+
     @Test func stacksPagesIntoOnePhoto() async throws {
         let first = drawReceipt([("Coffee", "3.50")])
         let second = drawReceipt([("TOTAL", "3.50")])
@@ -56,3 +73,6 @@ struct ReceiptScannerTests {
         #expect(total.box.y > 0.5)
     }
 }
+
+/// Finds the test bundle, where the photos are.
+private final class PhotoBundle {}
