@@ -53,7 +53,7 @@ struct ReceiptScannerTests {
         // The simulator recognises Japanese on the CPU, far slower than a phone: a smaller copy, and a
         // deadline so a stuck recogniser fails the test instead of the whole run.
         let page = try #require(ReceiptScanner.upright(image, width: 700).cgImage)
-        print("OCR: recognising \(page.width)×\(page.height)")
+        log("OCR: recognising \(page.width)×\(page.height)")
         let fragments: [OCRFragment]? = await withCheckedContinuation { continuation in
             let once = Once(continuation)
             Task.detached { once.resume(try? await ReceiptScanner.recognize(page)) }
@@ -65,10 +65,10 @@ struct ReceiptScannerTests {
         let pieces = try #require(fragments, "OCR: the recogniser took over 4 minutes")
         let rows = LineGrouper.rows(pieces)
         for row in rows {
-            print("OCR: \(row.fragments.map(\.text).joined(separator: " ¦ "))")
+            log("OCR: \(row.fragments.map(\.text).joined(separator: " ¦ "))")
         }
         let receipt = ReceiptParser.parse(rows, currency: "EUR")
-        print("OCR: parsed total=\(String(describing: receipt.total)) items=\(receipt.items.map(\.amount)) merchant=\(receipt.merchant ?? "-")")
+        log("OCR: parsed total=\(String(describing: receipt.total)) items=\(receipt.items.map(\.amount)) merchant=\(receipt.merchant ?? "-")")
         #expect(receipt.currency == "JPY")
         #expect(receipt.total == 3860)
         #expect(receipt.items.isEmpty)
@@ -105,4 +105,9 @@ private final class Once<T: Sendable>: @unchecked Sendable {
         lock.unlock()
         pending?.resume(returning: value)
     }
+}
+
+/// Straight to stderr, unbuffered, so CI shows it even if a test hangs afterwards.
+private func log(_ text: String) {
+    FileHandle.standardError.write(Data((text + "\n").utf8))
 }
