@@ -241,22 +241,78 @@ enum ReceiptParser {
         // A card slip lists no items, only the amount charged: its other numbers are slip, terminal and
         // approval numbers. Unless they happen to add up (a shop receipt with the card slip printed
         // below it), only the total is kept.
+        // Amounts read off the layout: whatever is printed to the right of a total label, however its
+        // sign and spacing came out. Whole-unit currencies only (yen, won), where slips print them so.
+        let laidOut = style.decimals == 0 ? layoutTotals(rows, scale: scale) : []
         if result.total == nil || result.mismatch != 0, isCardSlip(labels) {
             var slip = ParsedReceipt()
             slip.merchant = result.merchant
             slip.date = result.date
             slip.currency = result.currency
-            // The amount charged is the one printed with a sign, usually twice ("金額 ¥3,860", "合計金額
-            // ¥3,860"): the most frequent, then the largest. A misread total line can't win on its own.
-            let amounts = tokensByRow.indices.filter { categories[$0] != .payment }
+            // The amount charged is printed with a sign, usually twice ("金額 ¥3,860", "合計金額 ¥3,860"):
+            // the most frequent amount wins, then the largest. A misread total line can't win on its own.
+            let marked = tokensByRow.indices.filter { categories[$0] != .payment }
                 .flatMap { tokensByRow[$0].filter { $0.marked && !$0.negative } }
                 .compactMap { style.value($0, scale: scale) }
                 .filter { $0 > 0 }
-            let counts = Dictionary(amounts.map { ($0, 1) }, uniquingKeysWith: +)
-            slip.total = counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key < $1.key }?.key ?? result.total
+            slip.total = mostFrequent(marked + laidOut) ?? result.total
             result = slip
+        } else if result.total == nil, let total = mostFrequent(laidOut) {
+            result.total = total
         }
         return result
+    }
+
+    /// The most frequent value, the largest on a tie.
+    private static func mostFrequent(_ values: [Int64]) -> Int64? {
+        let counts = Dictionary(values.map { ($0, 1) }, uniquingKeysWith: +)
+        return counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key < $1.key }?.key
+    }
+
+    /// Words that label a total on its own line, with the amount printed to the right.
+    private static let totalLabels = ["合計", "金額", "合计", "합계", "total", "amount"]
+
+    /**
+     * Amounts found by where they sit, not by how the line was split into rows: for each total label,
+     * the pieces of text to its right on the nearest line (big amounts are often printed between two
+     * labels, half a line up). Their digits are read whatever the sign came out as ("¥", "Y", "\\",
+     * a stray character) and however wide they were spaced ("¥2, 5 0 0").
+     */
+    static func layoutTotals(_ rows: [ReceiptRow], scale: Int64) -> [Int64] {
+        let pieces = rows.flatMap(\.fragments)
+        var totals: [Int64] = []
+        for label in pieces {
+            let words = Self.label(of: label.text)
+            guard totalLabels.contains(where: { words.contains($0) }), !words.contains("sub") else { continue }
+            let band = label.box.height * 1.5
+            let right = pieces.filter { piece in
+                piece.box.x > label.box.x + label.box.width * 0.5
+                    && abs(piece.box.midY - label.box.midY) <= max(band, piece.box.height * 1.5)
+            }
+            // Of what is to the right, the line with digits nearest the label's height.
+            guard let nearest = right.filter({ $0.text.contains(where: \.isNumber) }).min(by: { abs($0.box.midY - label.box.midY) < abs($1.box.midY - label.box.midY) }) else { continue }
+            let line = right.filter { abs($0.box.midY - nearest.box.midY) <= max($0.box.height, nearest.box.height) * 0.5 }
+                .sorted { $0.box.x < $1.box.x }
+            // The first amount, and the pieces carrying on its digits ("¥2," "500"), up to the next words.
+            guard let start = line.firstIndex(where: { $0.text.contains(where: \.isNumber) }) else { continue }
+            var text = line[start].text
+            for piece in line[(start + 1)...] {
+                guard piece.text.allSatisfy({ $0.isNumber || ",.，、 ".contains($0) }) else { break }
+                text += piece.text
+            }
+            if let amount = layoutAmount(text.filter { !$0.isWhitespace }) { totals.append(amount * scale) }
+        }
+        return totals
+    }
+
+    /// "¥2,500", "Y2，500", "\\2,5 0 0" with spaces gone → 2500: the first grouped number in the text.
+    private static func layoutAmount(_ text: String) -> Int64? {
+        let normalized = text.replacingOccurrences(of: #"[，、]"#, with: ",", options: .regularExpression)
+        guard let regex = try? NSRegularExpression(pattern: #"\d{1,3}(?:[,.]\d{3})+|\d{3,7}"#) else { return nil }
+        let matches = regex.matches(in: normalized, range: NSRange(normalized.startIndex..., in: normalized))
+        guard let first = matches.first, let range = Range(first.range, in: normalized) else { return nil }
+        let value = Int64(normalized[range].filter(\.isNumber)) ?? 0
+        return value > 0 ? value : nil
     }
 
     /// Words only card slips print.
@@ -565,7 +621,8 @@ enum ReceiptParser {
 
     /// "¥3, 860", "¥ 3,860", "¥3，860" and "¥3 860" as read from wide type → "¥3,860".
     static func joiningSpacedAmounts(_ text: String) -> String {
-        text.replacingOccurrences(of: #"(?<=\d)[，、](?=\s*\d{3}(?!\d))"#, with: ",", options: .regularExpression)
+        text.replacingOccurrences(of: #"\\(?=\s*\d)"#, with: "¥", options: .regularExpression)
+            .replacingOccurrences(of: #"(?<=\d)[，、](?=\s*\d{3}(?!\d))"#, with: ",", options: .regularExpression)
             .replacingOccurrences(of: #"(?<=\d)．(?=\d)"#, with: ".", options: .regularExpression)
             .replacingOccurrences(of: #"(?<=[¥￥$€£₩฿])\s+(?=\d)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?<=\d[,.])\s+(?=\d{3}(?!\d))"#, with: "", options: .regularExpression)

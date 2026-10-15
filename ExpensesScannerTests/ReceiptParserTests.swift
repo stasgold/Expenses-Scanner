@@ -366,6 +366,35 @@ struct ReceiptParserTests {
         #expect(receipt.total == 3860)
     }
 
+    /// A slip as the camera sees it: the amounts printed large and spaced out, half a line above their
+    /// labels so they land on rows of their own, and the yen sign misread. The layout still pairs each
+    /// label with the amount to its right.
+    @Test func theAmountBesideATotalLabelIsReadByWhereItSits() {
+        func piece(_ text: String, x: Double, y: Double, width: Double = 0.2, height: Double = 0.02) -> OCRFragment {
+            OCRFragment(text: text, box: OCRBox(x: x, y: y, width: width, height: height))
+        }
+        let rows = LineGrouper.rows([
+            piece("CREDIT CARD SALES SLIP", x: 0.1, y: 0.10, width: 0.6),
+            piece("加盟店名", x: 0.1, y: 0.14),
+            piece("ハコネカイゾクセン", x: 0.35, y: 0.14, width: 0.4),
+            piece("承認番号APPROVAL CODE", x: 0.1, y: 0.50, width: 0.5),
+            piece("445533", x: 0.75, y: 0.50, width: 0.15),
+            piece("処理通番TRAN NO.", x: 0.1, y: 0.53, width: 0.4),
+            piece("373562", x: 0.75, y: 0.53, width: 0.15),
+            piece("羊2,", x: 0.62, y: 0.555, width: 0.1, height: 0.018),
+            piece("5 0 0", x: 0.74, y: 0.555, width: 0.14, height: 0.018),
+            piece("金額AMOUNT", x: 0.1, y: 0.575, width: 0.25),
+            piece("羊2，", x: 0.55, y: 0.60, width: 0.15, height: 0.04),
+            piece("500", x: 0.72, y: 0.60, width: 0.2, height: 0.04),
+            piece("合計金額", x: 0.1, y: 0.625, height: 0.04),
+            piece("TOTAL AMOUNT", x: 0.1, y: 0.67, width: 0.3),
+        ])
+        let receipt = ReceiptParser.parse(rows, currency: "JPY", now: now)
+        #expect(receipt.merchant == "ハコネカイゾクセン")
+        #expect(receipt.items.isEmpty)
+        #expect(receipt.total == 2500)
+    }
+
     @Test func amountsPrintedSpacedOutAreOneAmount() {
         #expect(ReceiptParser.moneyTokens(in: "¥3, 860").map(\.core) == ["3,860"])
         #expect(ReceiptParser.moneyTokens(in: "¥ 1,200").map(\.core) == ["1,200"])
