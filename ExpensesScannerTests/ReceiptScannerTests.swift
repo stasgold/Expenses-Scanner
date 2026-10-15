@@ -46,8 +46,8 @@ struct ReceiptScannerTests {
     }
 
     /// A real photo of a contactless card slip (card and approval numbers blanked out), taken at an angle
-    /// in sunlight with the issuer's stamp over the amount.
-    @Test func readsAPhotographedCardSlip() async throws {
+    /// in sunlight with the issuer’s stamp over the amount, cropped to the slip as the document scanner does.
+    @Test(.timeLimit(.minutes(3))) func readsAPhotographedCardSlip() async throws {
         let url = try #require(Bundle(for: PhotoBundle.self).url(forResource: "cardnet-sales-slip", withExtension: "jpg"))
         let image = try #require(UIImage(contentsOfFile: url.path))
         let scanned = try await ReceiptScanner.scan([image])
