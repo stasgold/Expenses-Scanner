@@ -76,27 +76,39 @@ struct TranslatedReceiptView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(rows.indices, id: \.self) { index in
-                    let row = rows[index]
-                    let words = ReceiptParser.cleanName(row.text)
-                    let amount = Self.amount(in: row)
-                    if !words.isEmpty || amount != nil {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.translation ?? words)
-                                if row.translation != nil, row.translation != words {
-                                    Text(words)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                Section {
+                    ForEach(rows.indices, id: \.self) { index in
+                        let row = rows[index]
+                        let words = ReceiptParser.cleanName(row.text)
+                        let amount = Self.amount(in: row)
+                        if !words.isEmpty || amount != nil {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.translation ?? words)
+                                    if row.translation != nil, row.translation != words {
+                                        Text(words)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
-                            }
-                            Spacer(minLength: 8)
-                            if let amount {
-                                Text(amount)
-                                    .monospacedDigit()
+                                Spacer(minLength: 8)
+                                if let amount {
+                                    Text(amount)
+                                        .monospacedDigit()
+                                }
                             }
                         }
                     }
+                }
+                // Exactly what the camera read, piece by piece: for checking a misread amount.
+                Section {
+                    ForEach(rows.indices, id: \.self) { index in
+                        Text(rows[index].fragments.map(\.text).joined(separator: "  ·  "))
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                    }
+                } header: {
+                    Text(L10n.textAsRead)
                 }
             }
             .navigationTitle(L10n.translatedReceipt)

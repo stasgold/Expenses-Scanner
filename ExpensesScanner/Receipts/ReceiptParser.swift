@@ -241,12 +241,19 @@ enum ReceiptParser {
         // A card slip lists no items, only the amount charged: its other numbers are slip, terminal and
         // approval numbers. Unless they happen to add up (a shop receipt with the card slip printed
         // below it), only the total is kept.
-        if result.total != nil, result.mismatch != 0, isCardSlip(labels) {
+        if result.total == nil || result.mismatch != 0, isCardSlip(labels) {
             var slip = ParsedReceipt()
             slip.merchant = result.merchant
             slip.date = result.date
             slip.currency = result.currency
-            slip.total = result.total
+            // The amount charged is the one printed with a sign, usually twice ("金額 ¥3,860", "合計金額
+            // ¥3,860"): the most frequent, then the largest. A misread total line can't win on its own.
+            let amounts = tokensByRow.indices.filter { categories[$0] != .payment }
+                .flatMap { tokensByRow[$0].filter { $0.marked && !$0.negative } }
+                .compactMap { style.value($0, scale: scale) }
+                .filter { $0 > 0 }
+            let counts = Dictionary(amounts.map { ($0, 1) }, uniquingKeysWith: +)
+            slip.total = counts.max { $0.value != $1.value ? $0.value < $1.value : $0.key < $1.key }?.key ?? result.total
             result = slip
         }
         return result
@@ -546,6 +553,8 @@ enum ReceiptParser {
     /// Currency words that may be attached to an amount ("1,200円", "Rp25.000", "12,50zł").
     private static let currencyWords: Set<String> = [
         "円", "元", "원", "บาท", "zł", "Kč", "Ft", "лв", "RMB", "Rp", "RM", "Rs", "kr", "Kr", "lei", "Fr", "đ",
+        // "¥" in large print is often read as "Y".
+        "Y",
     ]
 
     /// Every amount-like token in a line, left to right: "12,50", "€8.00", "-2.00", "3.50-", "(1.20)",
@@ -554,10 +563,13 @@ enum ReceiptParser {
         joiningSpacedAmounts(text).split(whereSeparator: \.isWhitespace).compactMap { moneyToken(String($0)) }
     }
 
-    /// "¥3, 860" and "¥ 3,860" as printed in wide type → "¥3,860".
+    /// "¥3, 860", "¥ 3,860", "¥3，860" and "¥3 860" as read from wide type → "¥3,860".
     static func joiningSpacedAmounts(_ text: String) -> String {
-        text.replacingOccurrences(of: #"(?<=[¥￥$€£₩฿])\s+(?=\d)"#, with: "", options: .regularExpression)
+        text.replacingOccurrences(of: #"(?<=\d)[，、](?=\s*\d{3}(?!\d))"#, with: ",", options: .regularExpression)
+            .replacingOccurrences(of: #"(?<=\d)．(?=\d)"#, with: ".", options: .regularExpression)
+            .replacingOccurrences(of: #"(?<=[¥￥$€£₩฿])\s+(?=\d)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?<=\d[,.])\s+(?=\d{3}(?!\d))"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?<=[¥￥]\d{1,3})\s+(?=\d{3}(?!\d))"#, with: ",", options: .regularExpression)
     }
 
     static func moneyToken(_ token: String) -> MoneyToken? {

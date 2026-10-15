@@ -181,6 +181,7 @@ enum L10n {
     // MARK: Translation
 
     static var translation: String { tr("translation", "Translation") }
+    static var textAsRead: String { tr("text_as_read", "Text as read") }
     static var translateTo: String { tr("translate_to", "Translate into") }
     static var translateToFooter: String {
         tr("translate_to_footer", "Receipts on this trip are translated into this language, on your iPhone.")

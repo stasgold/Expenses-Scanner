@@ -350,9 +350,28 @@ struct ReceiptParserTests {
         #expect(receipt.total == 3860)
     }
 
+    /// The big total on a slip misread ("¥3," lost under the issuer's stamp): the amount printed with a
+    /// sign elsewhere on the slip wins over it.
+    @Test func aMisreadTotalOnASlipGivesWayToTheAmountWithASign() {
+        let receipt = parse("""
+        CONTACTLESS SALES SLIP
+        加盟店名 ゴウラエキ
+        伝票番号  76415
+        承認番号APPROVAL CODE  453424
+        金額AMOUNT  ¥3, 860
+        合計金額  860
+        TOTAL AMOUNT
+        """, currency: "JPY")
+        #expect(receipt.items.isEmpty)
+        #expect(receipt.total == 3860)
+    }
+
     @Test func amountsPrintedSpacedOutAreOneAmount() {
         #expect(ReceiptParser.moneyTokens(in: "¥3, 860").map(\.core) == ["3,860"])
         #expect(ReceiptParser.moneyTokens(in: "¥ 1,200").map(\.core) == ["1,200"])
+        #expect(ReceiptParser.moneyTokens(in: "¥3，860").map(\.core) == ["3,860"])
+        #expect(ReceiptParser.moneyTokens(in: "¥3 860").map(\.core) == ["3,860"])
+        #expect(ReceiptParser.moneyTokens(in: "Y3,860") == [ReceiptParser.MoneyToken(core: "3,860", negative: false, marked: true)])
         #expect(ReceiptParser.moneyTokens(in: "2 x 3.50").map(\.core) == ["2", "3.50"])
     }
 

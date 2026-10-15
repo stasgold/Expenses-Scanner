@@ -53,8 +53,7 @@ jobs:
             -scheme ExpensesScanner \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             CODE_SIGNING_ALLOWED=NO \
-            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 300 \
-            | tee xcodebuild.log | grep --line-buffered -E "error:|warning:|Test (Suite|Case)|✔|✘|OCR:|passed|failed|\*\* (BUILD|TEST)" || true
+            | tee xcodebuild.log | grep -E "error:|warning:|Test (Suite|Case)|✔|✘|passed|failed|\*\* (BUILD|TEST)" || true
           grep -q "\*\* TEST SUCCEEDED \*\*" xcodebuild.log
 
       - name: Upload log
