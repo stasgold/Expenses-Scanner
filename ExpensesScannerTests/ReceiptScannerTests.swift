@@ -47,11 +47,23 @@ struct ReceiptScannerTests {
 
     /// A real photo of a contactless card slip (card and approval numbers blanked out), taken at an angle
     /// in sunlight with the issuer’s stamp over the amount, cropped to the slip as the document scanner does.
-    @Test(.timeLimit(.minutes(3))) func readsAPhotographedCardSlip() async throws {
+    @Test func readsAPhotographedCardSlip() async throws {
         let url = try #require(Bundle(for: PhotoBundle.self).url(forResource: "cardnet-sales-slip", withExtension: "jpg"))
         let image = try #require(UIImage(contentsOfFile: url.path))
-        let scanned = try await ReceiptScanner.scan([image])
-        let rows = LineGrouper.rows(scanned.fragments)
+        // The simulator recognises Japanese on the CPU, far slower than a phone: a smaller copy, and a
+        // deadline so a stuck recogniser fails the test instead of the whole run.
+        let page = try #require(ReceiptScanner.upright(image, width: 700).cgImage)
+        print("OCR: recognising \(page.width)×\(page.height)")
+        let fragments: [OCRFragment]? = await withCheckedContinuation { continuation in
+            let once = Once(continuation)
+            Task.detached { once.resume(try? await ReceiptScanner.recognize(page)) }
+            Task.detached {
+                try? await Task.sleep(for: .seconds(240))
+                once.resume(nil)
+            }
+        }
+        let pieces = try #require(fragments, "OCR: the recogniser took over 4 minutes")
+        let rows = LineGrouper.rows(pieces)
         for row in rows {
             print("OCR: \(row.fragments.map(\.text).joined(separator: " ¦ "))")
         }
@@ -76,3 +88,21 @@ struct ReceiptScannerTests {
 
 /// Finds the test bundle, where the photos are.
 private final class PhotoBundle {}
+
+/// Resumes a continuation the first time only.
+private final class Once<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+
+    init(_ continuation: CheckedContinuation<T, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ value: T) {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(returning: value)
+    }
+}
