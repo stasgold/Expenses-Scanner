@@ -309,6 +309,53 @@ struct ReceiptParserTests {
         #expect(receipt.discount == 0)
     }
 
+    /// A contactless sales slip: bilingual labels, the shop named after "加盟店名", slip, terminal and
+    /// approval numbers in a table, and the amount printed spaced out. Read from a real slip photo.
+    @Test func salesSlipKeepsOnlyTheAmountCharged() {
+        let receipt = parse("""
+        CARDNET
+        [コンタクトレス売上票]
+        CONTACTLESS SALES SLIP
+        加盟店名 ゴウラエキ
+        MERCHANT 0465-00-0000
+        ご利用日DATE 2026/10/15 09:34:25
+        カード番号CARD NO.  Contactless IC
+        466787XXXXXX0000
+        伝票番号  有効期限  取引内容
+        76415  XX年XX月  売上
+        SLIP NO.  EXP DATE  TRAN TYPE
+        支払区分  取扱区分  商品区分
+        一括  110
+        PMT TYPE  COM CODE
+        端末番号TERMINAL00000-000-00000
+        カード会社  MUFGカード  (105)
+        CARD COMPANY
+        承認番号APPROVAL CODE  453424
+        処理通番TRAN NO.  321247
+        金額AMOUNT
+        ¥3, 860
+        合計金額  ¥3,860
+        TOTAL AMOUNT
+        ご案内
+        ご利用ありがとうございました。
+        ARC00 ATC0015 No00  *2a996640000*
+        A0000000031010
+        売場SALES COUNTER  係員CLERK
+        お客様控 CUSTOMER COPY
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.merchant == "ゴウラエキ")
+        #expect(receipt.items.isEmpty)
+        #expect(receipt.discount == 0)
+        #expect(receipt.total == 3860)
+    }
+
+    @Test func amountsPrintedSpacedOutAreOneAmount() {
+        #expect(ReceiptParser.moneyTokens(in: "¥3, 860").map(\.core) == ["3,860"])
+        #expect(ReceiptParser.moneyTokens(in: "¥ 1,200").map(\.core) == ["1,200"])
+        #expect(ReceiptParser.moneyTokens(in: "2 x 3.50").map(\.core) == ["2", "3.50"])
+    }
+
     @Test func totalAtTheTopWithItsLinesBelow() {
         let receipt = parse("""
         Invoice

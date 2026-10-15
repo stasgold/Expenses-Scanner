@@ -26,6 +26,12 @@ struct ReceiptTranslationTests {
         #expect(ReceiptTranslation.detectLanguage(["領収書", "自由席券 ¥4,960", "お買上げありがとうございます"])?.languageCode == "ja")
         #expect(ReceiptTranslation.detectLanguage(["Thank you for dining with us", "Chicken curry 12.50", "Total 25.00"])?.languageCode == "en")
         #expect(ReceiptTranslation.detectLanguage(["12.50", "1,234", "09/10/2026"]) == nil)
+        // A bilingual slip is in its local language, however much English it prints.
+        #expect(ReceiptTranslation.detectLanguage([
+            "CONTACTLESS SALES SLIP", "[コンタクトレス売上票]", "加盟店名 ゴウラエキ", "ご利用日DATE 2026/10/15",
+            "承認番号APPROVAL CODE 453424", "合計金額 ¥3,860", "TOTAL AMOUNT", "ご利用ありがとうございました。",
+            "SALES COUNTER", "CUSTOMER COPY",
+        ])?.languageCode == "ja")
     }
 
     @Test func onlyWordsAreSentNeverAmounts() {

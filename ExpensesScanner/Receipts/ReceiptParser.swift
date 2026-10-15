@@ -220,22 +220,60 @@ enum ReceiptParser {
             resolveTax(&result, taxAfterTotal: taxAfterTotal, includedHint: includedHint)
             return result
         }
-        let result = finish(lines)
-
         // Lines short of the total by exactly what a short bare number says ("袋 4", left out as maybe a
         // count) are items after all.
-        guard let gap = result.mismatch, gap > 0, let first = result.firstItemLine else { return result }
-        let candidates = lines.filter {
-            reading.range.contains($0.index) && $0.index > first && $0.price == nil && $0.category == nil
-                && $0.smallPrice != nil && letterCount($0.name) >= 2
+        func withShortPrices(_ result: ParsedReceipt) -> ParsedReceipt {
+            guard let gap = result.mismatch, gap > 0, let first = result.firstItemLine else { return result }
+            let candidates = lines.filter {
+                reading.range.contains($0.index) && $0.index > first && $0.price == nil && $0.category == nil
+                    && $0.smallPrice != nil && letterCount($0.name) >= 2
+            }
+            let matching = candidates.filter { $0.smallPrice == gap }
+            let recovered = matching.count == 1 ? matching
+                : candidates.compactMap(\.smallPrice).reduce(0, +) == gap ? candidates : []
+            guard !recovered.isEmpty else { return result }
+            var amended = lines
+            for line in recovered { amended[line.index].price = line.smallPrice }
+            return finish(amended)
         }
-        let matching = candidates.filter { $0.smallPrice == gap }
-        let recovered = matching.count == 1 ? matching
-            : candidates.compactMap(\.smallPrice).reduce(0, +) == gap ? candidates : []
-        guard !recovered.isEmpty else { return result }
-        var amended = lines
-        for line in recovered { amended[line.index].price = line.smallPrice }
-        return finish(amended)
+        var result = withShortPrices(finish(lines))
+
+        // A card slip lists no items, only the amount charged: its other numbers are slip, terminal and
+        // approval numbers. Unless they happen to add up (a shop receipt with the card slip printed
+        // below it), only the total is kept.
+        if result.total != nil, result.mismatch != 0, isCardSlip(labels) {
+            var slip = ParsedReceipt()
+            slip.merchant = result.merchant
+            slip.date = result.date
+            slip.currency = result.currency
+            slip.total = result.total
+            result = slip
+        }
+        return result
+    }
+
+    /// Words only card slips print.
+    private static let cardSlipMarkers = [
+        "売上票", "ご利用控", "利用控", "承認番号", "伝票番号", "処理通番", "端末番号", "加盟店名", "カード会社", "有効期限",
+        "sales slip", "approval code", "approval no", "slip no", "card company", "exp date", "terminal",
+    ]
+
+    static func isCardSlip(_ labels: [String]) -> Bool {
+        let text = labels.joined(separator: "\n")
+        return cardSlipMarkers.filter { text.contains(normalized($0)) }.count >= 3
+    }
+
+    /// Labels that name the shop on the line itself: "加盟店名 ゴウラエキ", "Merchant name: Café Rex".
+    private static let merchantLabels = ["加盟店名", "加盟店", "店舗名", "店名", "merchant name", "store name", "shop name"]
+
+    private static func labelledMerchant(_ text: String) -> String? {
+        let text = text.trimmed
+        for label in merchantLabels {
+            guard let range = text.range(of: label, options: [.anchored, .caseInsensitive, .widthInsensitive]) else { continue }
+            let name = cleanName(String(text[range.upperBound...]).trimmingCharacters(in: CharacterSet(charactersIn: ":：").union(.whitespaces)))
+            return letterCount(name) >= 2 ? name : nil
+        }
+        return nil
     }
 
     /// The text with the spaces between CJK characters taken out, for matching keywords: receipts
@@ -346,6 +384,7 @@ enum ReceiptParser {
     ]
 
     private static func merchant(_ lines: [Line], before end: Int, skipping used: Set<Int>) -> String? {
+        if let named = lines.lazy.compactMap({ labelledMerchant($0.text) }).first { return named }
         for line in lines.prefix(end) where line.price == nil && !used.contains(line.index) {
             var name = line.name
             // A heading that also says what the slip is ("… クレジットご利用控"): its first piece may be the name.
@@ -512,7 +551,13 @@ enum ReceiptParser {
     /// Every amount-like token in a line, left to right: "12,50", "€8.00", "-2.00", "3.50-", "(1.20)",
     /// "12.50EUR". Percentages, times, dates and codes with letters inside are not amounts.
     static func moneyTokens(in text: String) -> [MoneyToken] {
-        text.split(whereSeparator: \.isWhitespace).compactMap { moneyToken(String($0)) }
+        joiningSpacedAmounts(text).split(whereSeparator: \.isWhitespace).compactMap { moneyToken(String($0)) }
+    }
+
+    /// "¥3, 860" and "¥ 3,860" as printed in wide type → "¥3,860".
+    static func joiningSpacedAmounts(_ text: String) -> String {
+        text.replacingOccurrences(of: #"(?<=[¥￥$€£₩฿])\s+(?=\d)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?<=\d[,.])\s+(?=\d{3}(?!\d))"#, with: "", options: .regularExpression)
     }
 
     static func moneyToken(_ token: String) -> MoneyToken? {

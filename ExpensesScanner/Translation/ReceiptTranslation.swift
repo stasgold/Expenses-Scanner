@@ -33,8 +33,16 @@ enum Languages {
 enum ReceiptTranslation {
     /// The language a receipt is written in, guessed from its words; nil when unsure.
     static func detectLanguage(_ texts: [String]) -> Locale.Language? {
-        let words = texts.map { $0.filter { !$0.isNumber } }.joined(separator: "\n")
+        var words = texts.map { $0.filter { !$0.isNumber } }.joined(separator: "\n")
         guard words.contains(where: \.isLetter) else { return nil }
+        // Slips printed in two languages ("合計金額 TOTAL AMOUNT") are in the local one: when a good part
+        // of the letters aren't Latin, the Latin ones are left out.
+        func isLatin(_ character: Character) -> Bool { character.unicodeScalars.allSatisfy { $0.value < 0x250 } }
+        let letters = words.filter(\.isLetter)
+        let others = letters.filter { !isLatin($0) }.count
+        if others > 0, Double(others) >= Double(letters.count) * 0.25 {
+            words = String(words.filter { !$0.isLetter || !isLatin($0) })
+        }
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(words)
         guard let language = recognizer.dominantLanguage, language != .undetermined,
