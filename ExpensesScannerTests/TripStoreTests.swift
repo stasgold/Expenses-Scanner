@@ -437,3 +437,13 @@ struct ReceiptAndRateStoreTests {
         #expect(expense.needsRate)
     }
 }
+
+struct OpeningTripTests {
+    @Test func opensTheLastTripWhileItExists() {
+        let recent = UUID(), older = UUID(), deleted = UUID()
+        #expect(TripsListView.tripToOpen(last: older, trips: [recent, older]) == older)
+        #expect(TripsListView.tripToOpen(last: deleted, trips: [recent, older]) == recent)
+        #expect(TripsListView.tripToOpen(last: nil, trips: [recent, older]) == recent)
+        #expect(TripsListView.tripToOpen(last: nil, trips: []) == nil)
+    }
+}

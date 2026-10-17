@@ -13,6 +13,9 @@ struct TripsListView: View {
     private var trips: [Trip]
 
     @State private var path: [TripRoute] = []
+    /// The trip the app opens on: the last one opened, so a receipt is one tap away.
+    @AppStorage("lastTripID") private var lastTripID = ""
+    @State private var openedLastTrip = false
     @State private var showNewTrip = false
     @State private var prompt: TextPrompt?
     @State private var confirmation: Confirmation?
@@ -39,6 +42,10 @@ struct TripsListView: View {
             .navigationDestination(for: TripRoute.self) { route in
                 TripView(tripID: route.tripID)
             }
+        }
+        .onAppear(perform: openLastTrip)
+        .onChange(of: path) { _, path in
+            if let trip = path.last { lastTripID = trip.tripID.uuidString }
         }
         .sheet(isPresented: $showNewTrip) {
             NewTripSheet { name, currency, people in
@@ -90,6 +97,22 @@ struct TripsListView: View {
             Button(L10n.newTrip) { showNewTrip = true }
                 .buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Once per launch, straight into the last trip; "Trips" (back) lists the others.
+    private func openLastTrip() {
+        guard !openedLastTrip else { return }
+        openedLastTrip = true
+        guard path.isEmpty, let id = Self.tripToOpen(last: UUID(uuidString: lastTripID), trips: trips.map(\.uuid)) else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { path = [TripRoute(tripID: id)] }
+    }
+
+    /// The last trip opened while it still exists, else the most recently used (`trips` comes newest first).
+    nonisolated static func tripToOpen(last: UUID?, trips: [UUID]) -> UUID? {
+        if let last, trips.contains(last) { return last }
+        return trips.first
     }
 
     private func rename(_ trip: Trip) {
