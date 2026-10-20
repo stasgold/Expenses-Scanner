@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftData
 import SwiftUI
+import Translation
 import UIKit
 
 /// One trip: its expenses, or who owes whom.
@@ -16,6 +17,7 @@ struct TripView: View {
     @State private var confirmation: Confirmation?
     @State private var receipt: ReceiptSession?
     @State private var showScanner = false
+    @State private var titleTranslation: TranslationSession.Configuration?
     @State private var showPhotoPicker = false
     @State private var photoItem: PhotosPickerItem?
     @State private var reading = false
@@ -149,10 +151,10 @@ struct TripView: View {
             }
         }
         .fullScreenCover(isPresented: $showScanner) {
-            DocumentScanner(
-                onScan: { pages in
+            ReceiptCamera(
+                onCapture: { photo in
                     showScanner = false
-                    read(pages, for: trip)
+                    read([photo], for: trip)
                 },
                 onCancel: { showScanner = false }
             )
@@ -181,12 +183,19 @@ struct TripView: View {
         .task(id: RateUpdater.pendingKey(trip)) {
             await RateUpdater.fill(trip, store: store)
         }
+        // Receipt titles get their translation too, for receipts saved before it was made.
+        .task(id: TitleTranslator.pendingKey(trip)) {
+            titleTranslation = await TitleTranslator.configuration(for: trip)
+        }
+        .translationTask(titleTranslation) { session in
+            await TitleTranslator.translate(trip, using: session, store: store)
+        }
     }
 
     /// Scan, pick a photo, or type it in.
     @ViewBuilder
     private func addMenu(_ trip: Trip) -> some View {
-        if DocumentScanner.isAvailable {
+        if ReceiptCamera.isAvailable {
             Button { startScan(trip) } label: {
                 Label(L10n.scanReceipt, systemImage: "doc.viewfinder")
             }
@@ -214,9 +223,9 @@ struct TripView: View {
                         .buttonStyle(.borderedProminent)
                 } else {
                     Button {
-                        if DocumentScanner.isAvailable { startScan(trip) } else { choosePhoto(trip) }
+                        if ReceiptCamera.isAvailable { startScan(trip) } else { choosePhoto(trip) }
                     } label: {
-                        Label(DocumentScanner.isAvailable ? L10n.scanReceipt : L10n.choosePhoto, systemImage: "doc.viewfinder")
+                        Label(ReceiptCamera.isAvailable ? L10n.scanReceipt : L10n.choosePhoto, systemImage: "doc.viewfinder")
                     }
                     .buttonStyle(.borderedProminent)
                     Button(L10n.enterManually) { addExpense(to: trip) }

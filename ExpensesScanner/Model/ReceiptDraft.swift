@@ -16,6 +16,32 @@ struct ReceiptItemDraft: Identifiable, Equatable {
     var translatedLanguage: String?
 }
 
+/// A receipt's title in another language. `source` is the title it was made from: once the title is
+/// edited the translation no longer applies.
+struct TitleTranslation: Codable, Equatable {
+    var source: String
+    var text: String
+    /// BCP 47.
+    var language: String
+}
+
+/// What a receipt's text is saved as (`Expense.ocrLines`): its lines as read, and its title translated.
+/// Receipts saved before titles were translated hold just the lines.
+struct SavedReceiptText: Codable, Equatable {
+    var rows: [ReceiptRow]
+    var title: TitleTranslation?
+
+    static func decode(_ data: Data?) -> SavedReceiptText {
+        guard let data else { return SavedReceiptText(rows: []) }
+        if let saved = try? JSONDecoder().decode(SavedReceiptText.self, from: data) { return saved }
+        return SavedReceiptText(rows: (try? JSONDecoder().decode([ReceiptRow].self, from: data)) ?? [])
+    }
+
+    var encoded: Data? {
+        rows.isEmpty && title == nil ? nil : try? JSONEncoder().encode(self)
+    }
+}
+
 /// A scanned (or scanned and edited) receipt before it is saved.
 struct ReceiptExpenseDraft: Equatable {
     var title: String = ""
@@ -39,6 +65,8 @@ struct ReceiptExpenseDraft: Equatable {
     var rows: [ReceiptRow] = []
     /// The language the receipt is written in (BCP 47), once known.
     var sourceLanguage: String?
+    /// The title (the shop's name) in the reader's language.
+    var titleTranslation: TitleTranslation?
 
     init(currency: CurrencyCode) {
         self.currency = currency

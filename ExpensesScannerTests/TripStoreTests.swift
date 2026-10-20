@@ -276,15 +276,53 @@ struct ReceiptAndRateStoreTests {
         draft.rows[0].translation = "Seven-Eleven"
         draft.rows[0].translationLanguage = "en"
         let english = Locale.Language(identifier: "en")
-        #expect(ReceiptTranslation.translatedTitle(draft.title, rows: draft.rows, language: english) == "Seven-Eleven")
+        #expect(ReceiptTranslation.translatedTitle(draft.title, text: SavedReceiptText(rows: draft.rows), language: english) == "Seven-Eleven")
         // Not in the language asked for, or a title typed by hand: nothing to show.
-        #expect(ReceiptTranslation.translatedTitle(draft.title, rows: draft.rows, language: Locale.Language(identifier: "de")) == nil)
-        #expect(ReceiptTranslation.translatedTitle("Lunch", rows: draft.rows, language: english) == nil)
+        #expect(ReceiptTranslation.translatedTitle(draft.title, text: SavedReceiptText(rows: draft.rows), language: Locale.Language(identifier: "de")) == nil)
+        #expect(ReceiptTranslation.translatedTitle("Lunch", text: SavedReceiptText(rows: draft.rows), language: english) == nil)
 
         let expense = store.addReceipt(to: trip, draft)
         #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == "Seven-Eleven")
         store.setTargetLanguage(trip, "de")
         #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == nil)
+    }
+
+    @Test func aTitlesOwnTranslationIsSavedWithTheReceipt() throws {
+        let trip = store.createTrip(name: "Tokyo", homeCurrency: "EUR", people: ["Ann"])
+        store.setTargetLanguage(trip, "en")
+        let ann = trip.orderedParticipants[0].uuid
+        let english = Locale.Language(identifier: "en")
+        var draft = ReceiptExpenseDraft(currency: "JPY")
+        draft.payerID = ann
+        draft.title = "ラーメンボンテン"
+        draft.items = [ReceiptItemDraft(name: "ラーメン", amount: 900, weights: [ann: 1])]
+        #expect(ReceiptTranslation.jobs(for: draft, target: english).first == ReceiptTranslation.Job(id: "title", text: "ラーメンボンテン"))
+        ReceiptTranslation.apply(["title": "Ramen Bonten"], to: &draft, language: english)
+        #expect(ReceiptTranslation.jobs(for: draft, target: english).allSatisfy { $0.id != "title" })
+
+        let expense = store.addReceipt(to: trip, draft)
+        #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == "Ramen Bonten")
+        #expect(store.receiptDraft(for: expense).titleTranslation?.text == "Ramen Bonten")
+
+        // An edited title no longer matches its translation, and asks for a new one.
+        var edited = store.receiptDraft(for: expense)
+        edited.title = "Bonten"
+        store.updateReceipt(expense, edited)
+        #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == nil)
+        #expect(ReceiptTranslation.titleNeedsTranslation("Bonten", saved: expense.receiptText.title, target: english))
+
+        // Translated later, from the trip screen.
+        store.setTitleTranslation(expense, TitleTranslation(source: "Bonten", text: "Bonten Ramen", language: "en"))
+        #expect(trip.snapshot.expenses.first { $0.id == expense.uuid }?.translatedTitle == "Bonten Ramen")
+        #expect(store.receiptDraft(for: expense).items.map(\.name) == ["ラーメン"])
+    }
+
+    @Test func receiptsSavedWithJustTheirLinesStillOpen() throws {
+        let rows = receiptRows("緑茶  ¥140")
+        let legacy = try JSONEncoder().encode(rows)
+        #expect(SavedReceiptText.decode(legacy) == SavedReceiptText(rows: rows))
+        #expect(SavedReceiptText.decode(nil) == SavedReceiptText(rows: []))
+        #expect(SavedReceiptText(rows: []).encoded == nil)
     }
 
     @Test func aReceiptWithOnlyItsTotalReadSplitsTheTotal() throws {

@@ -207,9 +207,20 @@ struct TripStore {
         draft.printedTotal = expense.printedTotal
         draft.rateToHome = expense.rateSource == .manual ? expense.rate : nil
         draft.photo = expense.photo
-        draft.rows = expense.receiptRows
+        let text = expense.receiptText
+        draft.rows = text.rows
+        draft.titleTranslation = text.title
         draft.sourceLanguage = expense.sourceLanguage
         return draft
+    }
+
+    /// Saves a receipt's title in the reader's language (translated from the trip screen).
+    func setTitleTranslation(_ expense: Expense, _ translation: TitleTranslation) {
+        var text = expense.receiptText
+        guard text.title != translation else { return }
+        text.title = translation
+        expense.ocrLines = text.encoded
+        save()
     }
 
     /// The language receipts on this trip are translated into; nil follows the phone.
@@ -290,7 +301,7 @@ struct TripStore {
         expense.extrasMode = draft.extrasMode
         expense.printedTotal = draft.printedTotal
         expense.sourceLanguage = draft.sourceLanguage
-        expense.ocrLines = draft.rows.isEmpty ? nil : try? JSONEncoder().encode(draft.rows)
+        expense.ocrLines = SavedReceiptText(rows: draft.rows, title: draft.titleTranslation).encoded
 
         for item in expense.items { context.delete(item) }
         expense.items = []
@@ -399,7 +410,7 @@ extension Trip {
                     input: expense.input,
                     rateIsApproximate: expense.rateSource == .cachedFallback,
                     translatedTitle: expense.kind == .receipt
-                        ? ReceiptTranslation.translatedTitle(expense.title, rows: expense.receiptRows, language: Languages.language(targetLanguage))
+                        ? ReceiptTranslation.translatedTitle(expense.title, text: expense.receiptText, language: Languages.language(targetLanguage))
                         : nil
                 )
             }
@@ -408,10 +419,8 @@ extension Trip {
 }
 
 extension Expense {
-    /// The receipt's lines as read, with their translations.
-    var receiptRows: [ReceiptRow] {
-        ocrLines.flatMap { try? JSONDecoder().decode([ReceiptRow].self, from: $0) } ?? []
-    }
+    /// The receipt's lines as read, with their translations, and its title translated.
+    var receiptText: SavedReceiptText { SavedReceiptText.decode(ocrLines) }
 }
 
 extension String {

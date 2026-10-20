@@ -156,7 +156,7 @@ struct ReceiptEditorView: View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
                 TextField(L10n.receiptTitle, text: $draft.title, prompt: Text(L10n.receiptTitleHint))
-                if let translated = ReceiptTranslation.translatedTitle(draft.title, rows: draft.rows, language: Languages.language(targetLanguage)) {
+                if let translated = ReceiptTranslation.translatedTitle(draft.title, text: SavedReceiptText(rows: draft.rows, title: draft.titleTranslation), language: Languages.language(targetLanguage)) {
                     Label(translated, systemImage: "character.bubble")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

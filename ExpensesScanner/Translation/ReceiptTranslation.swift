@@ -61,6 +61,9 @@ enum ReceiptTranslation {
     static func jobs(for draft: ReceiptExpenseDraft, target: Locale.Language) -> [Job] {
         let language = target.minimalIdentifier
         var jobs: [Job] = []
+        if titleNeedsTranslation(draft.title, saved: draft.titleTranslation, target: target) {
+            jobs.append(Job(id: "title", text: draft.title.trimmed))
+        }
         for item in draft.items where item.name.contains(where: \.isLetter) && item.translatedLanguage != language {
             jobs.append(Job(id: "item:\(item.id.uuidString)", text: item.name.trimmed))
         }
@@ -76,6 +79,9 @@ enum ReceiptTranslation {
     /// Writes translations (by job id) into the draft, marked with the language they are in.
     static func apply(_ answers: [String: String], to draft: inout ReceiptExpenseDraft, language target: Locale.Language) {
         let language = target.minimalIdentifier
+        if let text = answers["title"] {
+            draft.titleTranslation = TitleTranslation(source: draft.title.trimmed, text: text, language: language)
+        }
         for index in draft.items.indices {
             if let text = answers["item:\(draft.items[index].id.uuidString)"] {
                 draft.items[index].translatedName = text
@@ -91,21 +97,35 @@ enum ReceiptTranslation {
     }
 
     /**
-     * The receipt's title in `target`: the translation of the line it was read from (the shop's name).
-     * A title typed by hand matches no line and stays as it is.
+     * The receipt's title in `target`: its own translation while the title is unchanged, else the
+     * translation of the line it was read from. Nothing when it reads the same in both languages.
      */
-    static func translatedTitle(_ title: String, rows: [ReceiptRow], language target: Locale.Language) -> String? {
+    static func translatedTitle(_ title: String, text: SavedReceiptText, language target: Locale.Language) -> String? {
         let title = title.trimmed
         guard !title.isEmpty else { return nil }
         let language = target.minimalIdentifier
-        guard let row = rows.first(where: { $0.translationLanguage == language && ReceiptParser.cleanName($0.text) == title }),
-              let translation = row.translation?.trimmed, !translation.isEmpty, translation != title
+        let translation: String?
+        if let saved = text.title, saved.source == title, saved.language == language {
+            translation = saved.text
+        } else {
+            translation = text.rows.first { $0.translationLanguage == language && ReceiptParser.cleanName($0.text) == title }?.translation
+        }
+        guard let translation = translation?.trimmed, !translation.isEmpty,
+              translation.compare(title, options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]) != .orderedSame
         else { return nil }
         return translation
     }
 
+    /// Whether the title still needs translating into `target`.
+    static func titleNeedsTranslation(_ title: String, saved: TitleTranslation?, target: Locale.Language) -> Bool {
+        let title = title.trimmed
+        guard title.contains(where: \.isLetter) else { return false }
+        return !(saved?.source == title && saved?.language == target.minimalIdentifier)
+    }
+
     /// Drops every translation, e.g. when the target language changes.
     static func clear(_ draft: inout ReceiptExpenseDraft) {
+        draft.titleTranslation = nil
         for index in draft.items.indices {
             draft.items[index].translatedName = nil
             draft.items[index].translatedLanguage = nil
