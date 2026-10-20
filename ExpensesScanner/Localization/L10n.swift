@@ -133,9 +133,6 @@ enum L10n {
     // MARK: Receipts
 
     static var scanReceipt: String { tr("scan_receipt", "Scan receipt") }
-    static var cameraHint: String { tr("camera_hint", "Fill the frame with the receipt, then take one photo.") }
-    static var cameraNoAccess: String { tr("camera_no_access", "Allow camera access for Expenses in Settings to scan receipts, or choose a photo instead.") }
-    static var takePhoto: String { tr("take_photo", "Take photo") }
     static var choosePhoto: String { tr("choose_photo", "Choose photo") }
     static var enterManually: String { tr("enter_manually", "Enter manually") }
     static var readingReceipt: String { tr("reading_receipt", "Reading receipt…") }

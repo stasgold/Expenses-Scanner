@@ -151,10 +151,10 @@ struct TripView: View {
             }
         }
         .fullScreenCover(isPresented: $showScanner) {
-            ReceiptCamera(
-                onCapture: { photo in
+            DocumentScanner(
+                onScan: { pages in
                     showScanner = false
-                    read([photo], for: trip)
+                    read(pages, for: trip)
                 },
                 onCancel: { showScanner = false }
             )
@@ -195,7 +195,7 @@ struct TripView: View {
     /// Scan, pick a photo, or type it in.
     @ViewBuilder
     private func addMenu(_ trip: Trip) -> some View {
-        if ReceiptCamera.isAvailable {
+        if DocumentScanner.isAvailable {
             Button { startScan(trip) } label: {
                 Label(L10n.scanReceipt, systemImage: "doc.viewfinder")
             }
@@ -223,9 +223,9 @@ struct TripView: View {
                         .buttonStyle(.borderedProminent)
                 } else {
                     Button {
-                        if ReceiptCamera.isAvailable { startScan(trip) } else { choosePhoto(trip) }
+                        if DocumentScanner.isAvailable { startScan(trip) } else { choosePhoto(trip) }
                     } label: {
-                        Label(ReceiptCamera.isAvailable ? L10n.scanReceipt : L10n.choosePhoto, systemImage: "doc.viewfinder")
+                        Label(DocumentScanner.isAvailable ? L10n.scanReceipt : L10n.choosePhoto, systemImage: "doc.viewfinder")
                     }
                     .buttonStyle(.borderedProminent)
                     Button(L10n.enterManually) { addExpense(to: trip) }

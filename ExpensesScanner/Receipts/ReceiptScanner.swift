@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Vision
+import VisionKit
 
 /// A receipt ready to review: one photo (pages stacked top to bottom) and the text read off it.
 struct ScannedReceipt {
@@ -86,6 +87,49 @@ enum ReceiptScanner {
         format.scale = 1
         return UIGraphicsImageRenderer(size: target, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
+}
+
+/// Apple's document camera: finds the receipt's edges, straightens it, and takes several pages for a
+/// long one. Not available in the simulator.
+struct DocumentScanner: UIViewControllerRepresentable {
+    let onScan: ([UIImage]) -> Void
+    let onCancel: () -> Void
+
+    static var isAvailable: Bool { VNDocumentCameraViewController.isSupported }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onScan: onScan, onCancel: onCancel)
+    }
+
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let controller = VNDocumentCameraViewController()
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
+
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let onScan: ([UIImage]) -> Void
+        let onCancel: () -> Void
+
+        init(onScan: @escaping ([UIImage]) -> Void, onCancel: @escaping () -> Void) {
+            self.onScan = onScan
+            self.onCancel = onCancel
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            onScan((0..<scan.pageCount).map { scan.imageOfPage(at: $0) })
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            onCancel()
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            onCancel()
         }
     }
 }
