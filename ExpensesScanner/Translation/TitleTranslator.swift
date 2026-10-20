@@ -13,9 +13,9 @@ enum TitleTranslator {
         return trip.orderedExpenses.compactMap { expense in
             guard expense.kind == .receipt else { return nil }
             let text = expense.receiptText
-            guard ReceiptTranslation.titleNeedsTranslation(expense.title, saved: text.title, target: target),
-                  let source = expense.sourceLanguage.map { Languages.language($0) }
-                    ?? ReceiptTranslation.detectLanguage(text.rows.map(\.text) + [expense.title]),
+            guard ReceiptTranslation.titleNeedsTranslation(expense.title, saved: text.title, target: target) else { return nil }
+            let saved = expense.sourceLanguage.map { Languages.language($0) }
+            guard let source = saved ?? ReceiptTranslation.detectLanguage(text.rows.map(\.text) + [expense.title]),
                   !Languages.same(source, target)
             else { return nil }
             return (expense, source)
