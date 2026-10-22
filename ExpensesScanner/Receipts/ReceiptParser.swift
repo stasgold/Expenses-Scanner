@@ -715,6 +715,9 @@ enum ReceiptParser {
             // In whole units (yen, won, rupiah) a bare "1", "9" or "10" is a count, a day or a seat, not a
             // price; real prices there have three digits or a currency sign.
             if decimals == 0 && !token.marked && (marksRequired || core.filter(\.isNumber).count < 3) { return nil }
+            // A long run of digits with neither sign nor grouping ("AK 291135") is a ticket or slip number:
+            // amounts that large are printed "¥291,135".
+            if decimals == 0 && !token.marked && core.count >= 6 && core.allSatisfy(\.isNumber) { return nil }
             let fractionValue = Int64(fraction) ?? 0
             let minor: Int64
             if decimals > 0 {

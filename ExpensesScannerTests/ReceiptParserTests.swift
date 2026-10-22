@@ -395,6 +395,21 @@ struct ReceiptParserTests {
         #expect(receipt.total == 2500)
     }
 
+    /// An admission ticket: one price, no total, and the ticket number printed where a price would be.
+    @Test func aTicketNumberIsNotAPrice() {
+        let receipt = parse("""
+        シーキャンドル昇塔券
+        &コッキング苑ナイト  大人
+        利用年月日
+        2026/10/22
+        Adults  ¥1,100
+        AK  291135
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(receipt.merchant == "シーキャンドル昇塔券")
+        #expect(receipt.items.map(\.amount) == [1100])
+    }
+
     @Test func amountsPrintedSpacedOutAreOneAmount() {
         #expect(ReceiptParser.moneyTokens(in: "¥3, 860").map(\.core) == ["3,860"])
         #expect(ReceiptParser.moneyTokens(in: "¥ 1,200").map(\.core) == ["1,200"])
