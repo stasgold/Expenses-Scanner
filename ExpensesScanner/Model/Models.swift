@@ -175,19 +175,30 @@ enum ExpensesMigrationPlan: SchemaMigrationPlan {
 }
 
 extension ModelContainer {
-    /// The app's database. `inMemory` gives tests and previews a throwaway copy.
-    static func expenses(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: ExpensesSchemaV1.self)
-        let configuration = ModelConfiguration("Expenses", schema: schema, isStoredInMemoryOnly: inMemory)
-        return try ModelContainer(for: schema, migrationPlan: ExpensesMigrationPlan.self, configurations: [configuration])
+    private static var expensesSchema: Schema { Schema(versionedSchema: ExpensesSchemaV1.self) }
+
+    private static func expenses(_ configuration: ModelConfiguration) throws -> ModelContainer {
+        try ModelContainer(for: expensesSchema, migrationPlan: ExpensesMigrationPlan.self, configurations: [configuration])
     }
 
-    /// Opens (and migrates) a store at an explicit location; lets tests upgrade an old database.
-    static func expenses(url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: ExpensesSchemaV1.self)
-        let configuration = ModelConfiguration(schema: schema, url: url)
-        return try ModelContainer(for: schema, migrationPlan: ExpensesMigrationPlan.self, configurations: [configuration])
+    /// The app's database.
+    static func expenses() throws -> ModelContainer {
+        try expenses(ModelConfiguration("Expenses", schema: expensesSchema))
     }
+
+    #if DEBUG
+    // For tests only; not in release builds.
+
+    /// A throwaway database (`inMemory`) or the app's own.
+    static func expenses(inMemory: Bool) throws -> ModelContainer {
+        try expenses(ModelConfiguration("Expenses", schema: expensesSchema, isStoredInMemoryOnly: inMemory))
+    }
+
+    /// Opens (and migrates) a store at an explicit location, to upgrade an old database.
+    static func expenses(url: URL) throws -> ModelContainer {
+        try expenses(ModelConfiguration(schema: expensesSchema, url: url))
+    }
+    #endif
 }
 
 // MARK: - Typed accessors and ordering
