@@ -141,7 +141,9 @@ enum ReceiptParser {
         let currency = detected ?? hint
         let tokensByRow = rows.map { moneyTokens(in: $0.text) }
         let labels = rows.map { label(of: $0.text) }
-        let categories = labels.map(classify)
+        // A line is what its words before the price say: "¥3,000 (税込)消費税率10%" is a price with a note
+        // that tax is included, not a tax line.
+        let categories = rows.map { classify(label(of: classifiedText($0.text))) }
         var style = NumberStyle.detect(tokensByRow.flatMap { $0 }, currencyDigits: Money.minorDigits(currency))
         // Whether prices carry a sign is decided by the item lines alone: Japanese shops print "¥" on
         // the subtotals and totals but not on the items.
@@ -337,6 +339,19 @@ enum ReceiptParser {
             return letterCount(name) >= 2 ? name : nil
         }
         return nil
+    }
+
+    /// The part of a line that says what it is: the words before its price, or, when the price comes
+    /// first, the whole line without notes on how it was taxed ("(税込)", "消費税率10%").
+    static func classifiedText(_ text: String) -> String {
+        let words = joiningSpacedAmounts(text).split(whereSeparator: \.isWhitespace).map(String.init)
+        let tokens = words.map(moneyToken)
+        guard let index = tokens.lastIndex(where: { $0?.marked == true }) ?? tokens.lastIndex(where: { $0 != nil }) else { return text }
+        let before = words[..<index].joined(separator: " ")
+        if before.contains(where: \.isLetter) { return before }
+        return text.replacingOccurrences(
+            of: #"[(（]?\s*(税込み?|税抜き?|内税|外税)\s*[)）]?|消費税率?\s*\d+\s*[%％]"#, with: " ", options: .regularExpression
+        )
     }
 
     /// The text with the spaces between CJK characters taken out, for matching keywords: receipts

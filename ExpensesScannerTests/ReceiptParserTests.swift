@@ -410,6 +410,31 @@ struct ReceiptParserTests {
         #expect(receipt.items.map(\.amount) == [1100])
     }
 
+    /// A museum ticket: the price printed first with a note that tax is included, no total line, and a
+    /// long ticket number at the bottom.
+    @Test func aPriceWithATaxIncludedNoteIsAnItem() {
+        let receipt = parse("""
+        MUSEUM CONTEMPORARY TOKYO
+        OF  ART
+        東京都現代美術館
+        公益財団法人東京都歴史文化財団
+        登録番号:T0000000000000
+        [領 収 書]  2026年10月24日 12:49
+        多田美波×共時的星叢
+        大人
+        Adult
+        ¥3,000  (税込)消費税率10%
+        MOTコレクション
+        MOT Collection
+        2026.9.19-2027.1.6
+        012026102400171  クレジット タッチ決 チケット発券端末01
+        通常
+        """, currency: "EUR")
+        #expect(receipt.currency == "JPY")
+        #expect(items(receipt) == ["Adult=3000"])
+        #expect(receipt.tax == 0)
+    }
+
     @Test func amountsPrintedSpacedOutAreOneAmount() {
         #expect(ReceiptParser.moneyTokens(in: "¥3, 860").map(\.core) == ["3,860"])
         #expect(ReceiptParser.moneyTokens(in: "¥ 1,200").map(\.core) == ["1,200"])
